@@ -18,13 +18,15 @@
 
 ### 1. 依赖安装 (非常重要)
 本插件依赖 `openai` 和 `earthengine-api` 库。您必须在 QGIS 的 Python 环境中安装它们。
-打开 **OSGeo4W Shell**（通常在您的开始菜单的 QGIS 文件夹下），运行以下命令：
+1. 在开始菜单的 QGIS 文件夹下找到 **OSGeo4W Shell**。
+2. ⚠️ **右键点击它，选择“以管理员身份运行”**（极其重要，否则可能出现权限报错）。
+3. 运行以下命令：
 ```cmd
 python -m pip install openai earthengine-api requests
 ```
 
 ### 2. 插件安装
-1. 在本仓库的 [Releases](#) 页面下载最新的 `qgis_agent_plugin_vX.X.X.zip`。
+1. 在本仓库的 [Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 页面下载最新的 `qgis_agent_plugin_vX.X.X.zip`。
 2. 打开 QGIS，点击顶部菜单栏的 `插件 (Plugins)` -> `管理并安装插件 (Manage and Install Plugins)`。
 3. 选择左侧的 **从 ZIP 安装 (Install from ZIP)**，选中下载的压缩包并安装。
 
