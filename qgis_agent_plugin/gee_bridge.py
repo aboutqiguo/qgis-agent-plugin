@@ -141,9 +141,8 @@ class GEEAuth:
             return True
             
         except Exception as e:
-            iface.messageBar().pushMessage("GEE Error", str(e), level=Qgis.Critical)
-            return False
-
+            # 必须抛出异常，否则 settings_dialog 的自定义 10013 错误窗口永远无法触发！
+            raise e
 
 class AgentMap:
     @staticmethod
