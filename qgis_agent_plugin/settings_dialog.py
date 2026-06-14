@@ -380,13 +380,25 @@ class SettingsDialog(QDialog):
                 fix_btn = msg.addButton("👉 一键打开终端进行认证", QMessageBox.ButtonRole.ActionRole)
                 msg.addButton(QMessageBox.StandardButton.Cancel)
                 
-                msg.exec_()
+                msg.exec()
                 
                 if msg.clickedButton() == fix_btn:
                     import subprocess
                     import sys
+                    import os
                     try:
-                        cmd = f'start "GEE 终端认证 (请在弹出的网页授权)" "{sys.executable}" -m earthengine authenticate'
+                        # sys.executable in QGIS points to qgis-bin.exe! We must find the real python.exe
+                        python_exe = "python"
+                        if "PYTHONHOME" in os.environ:
+                            py_path = os.path.join(os.environ["PYTHONHOME"], "python.exe")
+                            if os.path.exists(py_path):
+                                python_exe = py_path
+                        elif hasattr(sys, "exec_prefix"):
+                            py_path = os.path.join(sys.exec_prefix, "python.exe")
+                            if os.path.exists(py_path):
+                                python_exe = py_path
+                                
+                        cmd = f'start "GEE 终端认证 (请在弹出的网页授权)" "{python_exe}" -m earthengine authenticate'
                         subprocess.Popen(cmd, shell=True)
                         QMessageBox.information(self, "提示", "终端已成功打开！\n请在自动弹出的网页中完成授权。\n\n授权成功后，请关闭终端并重启 QGIS！")
                     except Exception as ex:
