@@ -372,13 +372,13 @@ class SettingsDialog(QDialog):
             err_str = str(e)
             if "10013" in err_str or "10048" in err_str:
                 msg = QMessageBox(self)
-                msg.setIcon(QMessageBox.Critical)
+                msg.setIcon(QMessageBox.Icon.Critical)
                 msg.setWindowTitle("网络端口被拦截")
                 msg.setText("您的系统环境（如代理软件的 TUN 模式、或防火墙）拦截了本地端口，导致 QGIS 无法完成认证。")
                 msg.setInformativeText("为您提供了一个【傻瓜式修复方案】：\n点击下方按钮，会自动弹出一个黑色终端窗口进行认证。\n认证完成后重启 QGIS 即可。")
                 
-                fix_btn = msg.addButton("👉 一键打开终端进行认证", QMessageBox.ActionRole)
-                msg.addButton(QMessageBox.Cancel)
+                fix_btn = msg.addButton("👉 一键打开终端进行认证", QMessageBox.ButtonRole.ActionRole)
+                msg.addButton(QMessageBox.StandardButton.Cancel)
                 
                 msg.exec_()
                 
