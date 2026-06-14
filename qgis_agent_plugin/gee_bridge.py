@@ -101,13 +101,13 @@ class GEEAuth:
                             iface.messageBar().pushMessage("GEE", "Earth Engine 需要绑定 Project ID。", level=Qgis.Critical)
                             return False
                     
-                    settings.setValue("gee_agent_project_id", project_id)
-                    ee.Initialize(project=project_id)
-                    iface.messageBar().pushMessage("GEE", f"已成功绑定至项目 {project_id}。", level=Qgis.Success)
-                    return True
-                else:
-                    # Token expired or other error, proceed to full auth
-                    pass
+                        settings.setValue("gee_agent_project_id", project_id)
+                        ee.Initialize(project=project_id)
+                        iface.messageBar().pushMessage("GEE", f"已成功绑定至项目 {project_id}。", level=Qgis.Success)
+                        return True
+                    else:
+                        # Token expired or other error, proceed to full auth
+                        pass
                 
             if not force:
                 # Pop up a warning explaining we need full auth
@@ -126,8 +126,9 @@ class GEEAuth:
                     iface.messageBar().pushMessage("GEE", "认证已取消。", level=Qgis.Warning)
                     return False
                 
-            # Perform localhost auth (opens browser)
-            ee.Authenticate(auth_mode="localhost", force=True)
+            # Use localhost:0 to tell the OS to allocate a dynamic random port!
+            # This completely bypasses WinError 10013 caused by firewall blocking the default 8085 port.
+            ee.Authenticate(auth_mode="localhost:0", force=True)
             
             # Now prompt for project ID
             project_id = GEEAuth.prompt_for_project()
