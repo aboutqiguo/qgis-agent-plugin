@@ -49,3 +49,10 @@ def get_logger():
         logger.addHandler(qh)
         
     return logger
+
+def close_logger():
+    """Removes and closes all handlers attached to the logger so the log file is released."""
+    logger = logging.getLogger('QGISAIAgent')
+    for handler in logger.handlers[:]:
+        handler.close()
+        logger.removeHandler(handler)

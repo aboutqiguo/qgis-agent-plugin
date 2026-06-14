@@ -59,6 +59,10 @@ class QGISAIAgentPlugin:
             self.harness_thread.is_killed = True
             self.harness_thread.wait()
             
+        # Ensure logger handles are closed so QGIS can delete the folder on uninstall
+        from .logger import close_logger
+        close_logger()
+            
         try:
             from qgis.core import QgsProject
             QgsProject.instance().readProject.disconnect(self.on_project_loaded)
