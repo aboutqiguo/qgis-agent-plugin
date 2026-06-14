@@ -363,12 +363,36 @@ class SettingsDialog(QDialog):
         
     def reauthenticate_gee(self):
         from .gee_bridge import GEEAuth
+        from qgis.PyQt.QtWidgets import QMessageBox, QPushButton
         try:
             if GEEAuth.authenticate_and_initialize(force=True):
                 self.load_settings()
                 QMessageBox.information(self, "GEE", "GEE 认证成功！")
         except Exception as e:
-            QMessageBox.critical(self, "GEE 错误", str(e))
+            err_str = str(e)
+            if "10013" in err_str or "10048" in err_str:
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Critical)
+                msg.setWindowTitle("网络端口被拦截")
+                msg.setText("您的系统环境（如代理软件的 TUN 模式、或防火墙）拦截了本地端口，导致 QGIS 无法完成认证。")
+                msg.setInformativeText("为您提供了一个【傻瓜式修复方案】：\n点击下方按钮，会自动弹出一个黑色终端窗口进行认证。\n认证完成后重启 QGIS 即可。")
+                
+                fix_btn = msg.addButton("👉 一键打开终端进行认证", QMessageBox.ActionRole)
+                msg.addButton(QMessageBox.Cancel)
+                
+                msg.exec_()
+                
+                if msg.clickedButton() == fix_btn:
+                    import subprocess
+                    import sys
+                    try:
+                        cmd = f'start "GEE 终端认证 (请在弹出的网页授权)" "{sys.executable}" -m earthengine authenticate'
+                        subprocess.Popen(cmd, shell=True)
+                        QMessageBox.information(self, "提示", "终端已成功打开！\n请在自动弹出的网页中完成授权。\n\n授权成功后，请关闭终端并重启 QGIS！")
+                    except Exception as ex:
+                        QMessageBox.critical(self, "错误", f"无法启动终端：{ex}")
+            else:
+                QMessageBox.critical(self, "GEE 错误", err_str)
             
     def clear_gee_auth(self):
         from .gee_bridge import clear_gee_auth as bridge_clear
