@@ -271,18 +271,31 @@ class SettingsDialog(QDialog):
 
     def check_for_updates(self):
         from qgis.PyQt.QtCore import QCoreApplication
-        self.check_update_btn.setText("检查中 (Checking...)")
+        from .update_checker import UpdateChecker
+        
+        self.check_update_btn.setText("正在连接 GitHub... (Checking...)")
         self.check_update_btn.setEnabled(False)
         QCoreApplication.processEvents()
         
-        # [HOOK]: Here we will later implement the request to GitHub to fetch plugins.xml or latest release
-        import time
-        time.sleep(1) # Simulate network delay
-        
-        QMessageBox.information(self, "检查更新", "当前已是最新版本 (v1.0.0)！\\n\\n(此为预留 Hook 接口，未来将对接 GitHub Releases API 实现一键下载替换升级。)")
-        
-        self.check_update_btn.setText("立即检查更新 (Check Now)")
-        self.check_update_btn.setEnabled(True)
+        try:
+            local_v = UpdateChecker.get_local_version()
+            remote_v = UpdateChecker.get_remote_version()
+            
+            if not remote_v:
+                QMessageBox.warning(self, "检查失败", "无法连接到 GitHub 或网络超时，请检查您的网络设置！")
+            elif UpdateChecker.is_newer_version(local_v, remote_v):
+                msg = (f"🎉 发现新版本: v{remote_v}\n"
+                       f"当前版本: v{local_v}\n\n"
+                       f"请前往 QGIS 菜单：【插件】 -> 【管理并安装插件】\n"
+                       f"在【设置】中添加本插件的 plugins.xml 仓库链接，即可进行一键无缝热更新！")
+                QMessageBox.information(self, "发现新版本", msg)
+            else:
+                QMessageBox.information(self, "已是最新", f"当前版本 (v{local_v}) 已是最新版！")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"检查更新时发生错误: {str(e)}")
+        finally:
+            self.check_update_btn.setText("立即检查更新 (Check Now)")
+            self.check_update_btn.setEnabled(True)
 
     def change_page(self, index):
         self.stack.setCurrentIndex(index)

@@ -22,6 +22,24 @@ class QGISAIAgentPlugin:
         
         # Load memory for whatever project is initially active
         self.load_memory()
+        
+        # Check for updates on startup if enabled
+        from qgis.core import QgsSettings
+        settings = QgsSettings()
+        if settings.value("qgis_agent/auto_check_update", False, type=bool):
+            self.run_auto_update_check()
+
+    def run_auto_update_check(self):
+        from .update_checker import AsyncUpdateCheckThread
+        self.update_thread = AsyncUpdateCheckThread()
+        self.update_thread.finished_signal.connect(self.on_update_checked)
+        self.update_thread.start()
+
+    def on_update_checked(self, has_update, local_v, remote_v):
+        if has_update:
+            from qgis.core import Qgis
+            msg = f"发现新版本 v{remote_v}！请前往设置或插件管理器进行热更新。"
+            self.iface.messageBar().pushMessage("QGIS AI Agent", msg, level=Qgis.MessageLevel.Info, duration=10)
 
     def initGui(self):
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
