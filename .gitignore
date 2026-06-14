@@ -1,0 +1,35 @@
+# QGIS AI Agent Git Ignore
+
+# Secrets & Config
+.env
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Build & Release
+*.zip
+build/
+dist/
+
+# Test Data
+test_data/
+*.log
+*.sqlite
+*.gpkg
+*.tif
+*.shp
+*.geojson

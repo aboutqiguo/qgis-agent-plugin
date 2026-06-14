@@ -1,0 +1,12 @@
+[general]
+name=QGIS AI Agent
+qgisMinimumVersion=4.0
+qgisMaximumVersion=4.99
+description=An AI-powered GIS Agent using DeepSeek LLM for natural language geoprocessing and interaction.
+version=1.0.0
+author=SevenLita
+email=user@example.com
+about=AI Copilot for QGIS.
+tracker=
+repository=
+category=Analysis
