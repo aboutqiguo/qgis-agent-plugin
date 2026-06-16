@@ -2,6 +2,7 @@
 
 **QGIS AI Agent Copilot** 是一款基于大语言模型（如 DeepSeek、GLM-4V）的 QGIS 智能助手插件。
 插件旨在通过自然语言交互，辅助用户自动生成并执行 PyQGIS 代码，以简化数据获取、空间分析和制图工作流。
+基于QGIS 3.44
 
 ---
 
