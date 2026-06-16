@@ -252,7 +252,8 @@ class SettingsDialog(QDialog):
         title = QLabel("<h2>🔄 检查更新 (Updates)</h2>")
         layout.addWidget(title)
         
-        desc = QLabel("当前版本: <b>1.0.0</b><br><br>在线热更新机制预留，您可以在此检查 GitHub 上的新版本发布。")
+        from .update_checker import UpdateChecker
+        desc = QLabel(f"当前版本: <b>{UpdateChecker.get_local_version()}</b><br><br>在线热更新机制预留，您可以在此检查 GitHub 上的新版本发布。")
         desc.setStyleSheet("color: #6c757d; font-size: 13px;")
         layout.addWidget(desc)
         layout.addSpacing(20)
@@ -286,9 +287,19 @@ class SettingsDialog(QDialog):
             elif UpdateChecker.is_newer_version(local_v, remote_v):
                 msg = (f"🎉 发现新版本: v{remote_v}\n"
                        f"当前版本: v{local_v}\n\n"
-                       f"请前往 QGIS 菜单：【插件】 -> 【管理并安装插件】\n"
-                       f"在【设置】中添加本插件的 plugins.xml 仓库链接，即可进行一键无缝热更新！")
-                QMessageBox.information(self, "发现新版本", msg)
+                       f"是否立即自动从 GitHub 下载并覆盖安装该更新？\n\n"
+                       f"（点击 Yes 自动安装，点击 No 取消。如果您之前配置过仓库链接，也可以去 QGIS 插件库里更新）")
+                reply = QMessageBox.question(self, "发现新版本", msg, QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.check_update_btn.setText("正在下载并覆盖安装...请勿操作界面")
+                    self.check_update_btn.setEnabled(False)
+                    QCoreApplication.processEvents()
+                    
+                    success, res_msg = UpdateChecker.download_and_install_update(remote_v)
+                    if success:
+                        QMessageBox.information(self, "更新成功", res_msg)
+                    else:
+                        QMessageBox.warning(self, "更新失败", res_msg)
             else:
                 QMessageBox.information(self, "已是最新", f"当前版本 (v{local_v}) 已是最新版！")
         except Exception as e:
