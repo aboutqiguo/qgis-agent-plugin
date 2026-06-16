@@ -47,7 +47,7 @@ class GEEAuth:
         
         label = QLabel(msg)
         label.setOpenExternalLinks(True)
-        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setTextFormat(Qt.RichText)
         label.setWordWrap(True)
         layout.addWidget(label)
         
@@ -65,7 +65,7 @@ class GEEAuth:
         ok_btn.clicked.connect(dialog.accept)
         cancel_btn.clicked.connect(dialog.reject)
         
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if dialog.exec() == QDialog.Accepted:
             project = input_field.text().strip()
             if project:
                 return project
@@ -119,16 +119,21 @@ class GEEAuth:
                     None,
                     "授权 Google Earth Engine",
                     msg,
-                    QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok,
+                    QMessageBox.Cancel | QMessageBox.Ok,
                 )
                 
-                if reply == QMessageBox.StandardButton.Cancel:
+                if reply == QMessageBox.Cancel:
                     iface.messageBar().pushMessage("GEE", "认证已取消。", level=Qgis.Warning)
                     return False
                 
             # Use localhost:0 to tell the OS to allocate a dynamic random port!
             # This completely bypasses WinError 10013 caused by firewall blocking the default 8085 port.
-            ee.Authenticate(auth_mode="localhost:0", force=True)
+            scopes = [
+                'https://www.googleapis.com/auth/earthengine',
+                'https://www.googleapis.com/auth/devstorage.full_control',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            ee.Authenticate(auth_mode="localhost:0", force=True, scopes=scopes)
             
             # Now prompt for project ID
             project_id = GEEAuth.prompt_for_project()
@@ -205,7 +210,8 @@ class AgentMap:
                 
         # Try to zoom to extent if possible
         try:
-            bounds = ee_object.geometry().bounds().getInfo()["coordinates"][0]
+            coords = ee_object.geometry().bounds().getInfo().get("coordinates", [])
+            bounds = coords[0] if coords else []
             xs = [pt[0] for pt in bounds]
             ys = [pt[1] for pt in bounds]
             from qgis.core import QgsRectangle, QgsCoordinateReferenceSystem, QgsCoordinateTransform
@@ -303,30 +309,78 @@ class GEEWaitTask(QgsTask):
                 time.sleep(1)
 
 class GEEDriveSyncTask(QgsTask):
-    def __init__(self, description, drive_path, timeout=3600):
+    def __init__(self, description, drive_dir, filename_prefix, timeout=3600):
         super().__init__(description, QgsTask.CanCancel)
-        self.drive_path = drive_path
+        self.drive_dir = drive_dir
+        self.filename_prefix = filename_prefix
         self.timeout = timeout
         self.exception = None
+        self.synced_files = []
         
     def run(self):
-        import time, os
+        import time, os, glob
         start_time = time.time()
         while True:
             if self.isCanceled():
                 return False
-            if os.path.exists(self.drive_path):
-                size1 = os.path.getsize(self.drive_path)
-                time.sleep(2)
-                size2 = os.path.getsize(self.drive_path)
-                if size1 == size2 and size1 > 0:
+            
+            pattern = os.path.join(self.drive_dir, f"{self.filename_prefix}*.tif")
+            files = glob.glob(pattern)
+            
+            if files:
+                time.sleep(2) # Wait a bit for potential file size changes
+                all_stable = True
+                for f in files:
+                    try:
+                        size1 = os.path.getsize(f)
+                        time.sleep(0.5)
+                        size2 = os.path.getsize(f)
+                        if size1 != size2 or size1 == 0:
+                            all_stable = False
+                            break
+                    except Exception:
+                        all_stable = False
+                        break
+                        
+                if all_stable:
+                    self.synced_files = files
                     return True
+                    
             if time.time() - start_time > self.timeout:
                 self.exception = Exception("Timeout waiting for local Google Drive sync.")
                 return False
             for _ in range(5):
                 if self.isCanceled(): return False
                 time.sleep(1)
+
+class GEECopyTask(QgsTask):
+    def __init__(self, description, src_path, dest_path):
+        super().__init__(description, QgsTask.CanCancel)
+        self.src_path = src_path
+        self.dest_path = dest_path
+        self.exception = None
+        
+    def run(self):
+        import os
+        try:
+            total_length = os.path.getsize(self.src_path)
+            copied = 0
+            with open(self.src_path, 'rb') as f_in:
+                with open(self.dest_path, 'wb') as f_out:
+                    while True:
+                        if self.isCanceled():
+                            return False
+                        chunk = f_in.read(1024 * 1024 * 5) # 5MB chunks
+                        if not chunk:
+                            break
+                        f_out.write(chunk)
+                        copied += len(chunk)
+                        if total_length > 0:
+                            self.setProgress(copied / total_length * 100.0)
+            return True
+        except Exception as e:
+            self.exception = e
+            return False
 
 
 class GEEDownloader:
@@ -367,38 +421,57 @@ class GEEDownloader:
         Monitors a GEE export task and waits for Google Drive Desktop to sync the file locally.
         Once synced, copies the file to the destination directory and optionally cleans up the Drive copy.
         """
+        import os
         # 1. Wait for GEE Task to complete
         wait_task = GEEWaitTask(f"Waiting for GEE Cloud: {filename}", task_id, timeout)
         GEEDownloader.run_qgs_task_sync(wait_task)
         iface.messageBar().pushMessage("GEE", "GEE Task completed! Waiting for local Drive sync...", level=Qgis.MessageLevel.Success)
         
         # 2. Wait for Google Drive Desktop to sync the file
-        drive_path = os.path.join(drive_root, folder_name, f"{filename}.tif")
-        iface.messageBar().pushMessage("GEE Sync", f"Waiting for file to appear at {drive_path}", level=Qgis.MessageLevel.Info)
-        sync_task = GEEDriveSyncTask(f"Waiting for local sync: {filename}", drive_path, timeout)
+        drive_dir = os.path.join(drive_root, folder_name)
+        iface.messageBar().pushMessage("GEE Sync", f"Waiting for files to appear at {drive_dir}", level=Qgis.MessageLevel.Info)
+        sync_task = GEEDriveSyncTask(f"Waiting for local sync: {filename}", drive_dir, filename, timeout)
         GEEDownloader.run_qgs_task_sync(sync_task)
-        iface.messageBar().pushMessage("GEE Sync", "File synced locally!", level=Qgis.MessageLevel.Success)
+        iface.messageBar().pushMessage("GEE Sync", f"{len(sync_task.synced_files)} file(s) synced locally!", level=Qgis.MessageLevel.Success)
         
         # 3. Copy to destination
         os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, f"{filename}.tif")
-        
-        iface.messageBar().pushMessage("GEE", f"Copying file to {dest_path}", level=Qgis.MessageLevel.Info)
-        shutil.copy2(drive_path, dest_path)
-        
-        # 4. Clean up the original file in Drive to save space
-        try:
-            os.remove(drive_path)
-            iface.messageBar().pushMessage("GEE", "Cleaned up original file from Google Drive.", level=Qgis.MessageLevel.Success)
-        except Exception as e:
-            logger.warning(f"Failed to remove original file from Google Drive: {e}")
+        copied_paths = []
+        for drive_path in sync_task.synced_files:
+            f_name = os.path.basename(drive_path)
+            dest_path = os.path.join(dest_dir, f_name)
             
-        return dest_path
+            iface.messageBar().pushMessage("GEE", f"Copying {f_name} to project folder...", level=Qgis.MessageLevel.Info)
+            copy_task = GEECopyTask(f"Copying {f_name} from Google Drive", drive_path, dest_path)
+            GEEDownloader.run_qgs_task_sync(copy_task)
+            copied_paths.append(dest_path)
+            
+            # 4. Clean up original file in Drive to save space
+            try:
+                os.remove(drive_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove original file from Google Drive: {e}")
+                
+        iface.messageBar().pushMessage("GEE", "Cleaned up original files from Google Drive.", level=Qgis.MessageLevel.Success)
+        
+        if len(copied_paths) == 1:
+            return copied_paths[0]
+        else:
+            iface.messageBar().pushMessage("GEE", f"Merging {len(copied_paths)} tiles into a VRT...", level=Qgis.MessageLevel.Info)
+            vrt_path = os.path.join(dest_dir, f"{filename}.vrt")
+            try:
+                from osgeo import gdal
+                gdal.BuildVRT(vrt_path, copied_paths)
+                return vrt_path
+            except Exception as e:
+                logger.error(f"Failed to build VRT: {e}")
+                return copied_paths[0]
 
     @staticmethod
     def _download_via_drive_api(task_id, folder_name, filename, dest_dir, timeout=3600):
         import ee
         import requests
+        import os
         
         # 1. Wait for task to complete
         wait_task = GEEWaitTask(f"Waiting for GEE Cloud: {filename}", task_id, timeout)
@@ -412,33 +485,54 @@ class GEEDownloader:
         
         # 3. Search for the file in Drive
         search_url = "https://www.googleapis.com/drive/v3/files"
-        params = {'q': f"name='{filename}.tif' and trashed=false", 'fields': 'files(id, name)'}
+        # Since 'name contains' might be broad, we search broadly and filter locally.
+        params = {'q': f"name contains '{filename}' and trashed=false", 'fields': 'files(id, name)'}
         res = requests.get(search_url, params=params, headers=headers)
         res.raise_for_status()
         files = res.json().get('files', [])
         
-        if not files:
-            raise Exception(f"File {filename}.tif not found in Google Drive!")
+        target_files = [f for f in files if f['name'] == f"{filename}.tif" or (f['name'].startswith(f"{filename}-") and f['name'].endswith(".tif"))]
+        
+        if not target_files:
+            raise Exception(f"File(s) for {filename} not found in Google Drive!")
             
-        file_id = files[0]['id']
+        os.makedirs(dest_dir, exist_ok=True)
+        downloaded_paths = []
         
-        # 4. Download file
-        download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-        dest_path = os.path.join(dest_dir, f"{filename}.tif")
-        
-        iface.messageBar().pushMessage("GEE", f"Downloading {filename}.tif from Cloud...", level=Qgis.MessageLevel.Info)
-        
-        dl_task = GEEDownloadTask(f"Downloading {filename} from Cloud", download_url, dest_path, headers)
-        GEEDownloader.run_qgs_task_sync(dl_task)
-                    
-        # 5. Clean up from Drive
-        try:
-            requests.delete(f"https://www.googleapis.com/drive/v3/files/{file_id}", headers=headers)
-            iface.messageBar().pushMessage("GEE", "Cleaned up file from Google Drive.", level=Qgis.MessageLevel.Success)
-        except:
-            pass
+        # 4. Download file(s)
+        for idx, f_info in enumerate(target_files):
+            file_id = f_info['id']
+            f_name = f_info['name']
+            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+            dest_path = os.path.join(dest_dir, f_name)
             
-        return dest_path
+            iface.messageBar().pushMessage("GEE", f"Downloading {f_name} ({idx+1}/{len(target_files)})...", level=Qgis.MessageLevel.Info)
+            dl_task = GEEDownloadTask(f"Downloading {f_name}", download_url, dest_path, headers)
+            GEEDownloader.run_qgs_task_sync(dl_task)
+            downloaded_paths.append(dest_path)
+            
+            # 5. Clean up from Drive
+            try:
+                requests.delete(f"https://www.googleapis.com/drive/v3/files/{file_id}", headers=headers)
+            except:
+                pass
+                
+        if len(target_files) > 0:
+            iface.messageBar().pushMessage("GEE", f"Cleaned up {len(target_files)} file(s) from Google Drive.", level=Qgis.MessageLevel.Success)
+            
+        # 6. Merge if multiple slices
+        if len(downloaded_paths) == 1:
+            return downloaded_paths[0]
+        else:
+            iface.messageBar().pushMessage("GEE", f"Merging {len(downloaded_paths)} tiles into a VRT...", level=Qgis.MessageLevel.Info)
+            vrt_path = os.path.join(dest_dir, f"{filename}.vrt")
+            try:
+                from osgeo import gdal
+                gdal.BuildVRT(vrt_path, downloaded_paths)
+                return vrt_path
+            except Exception as e:
+                logger.error(f"Failed to build VRT: {e}")
+                return downloaded_paths[0]
 
     @staticmethod
     def download_ee_object(ee_object, filename, dest_dir, scale=30, region=None, crs='EPSG:4326'):

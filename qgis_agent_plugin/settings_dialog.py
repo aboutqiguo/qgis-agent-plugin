@@ -79,7 +79,7 @@ class SettingsDialog(QDialog):
     def build_deepseek_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setAlignment(Qt.AlignTop)
         
         title = QLabel("<h2>🐋 DeepSeek 配置</h2>")
         layout.addWidget(title)
@@ -94,7 +94,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(self.create_form_row("API 端点 (Base URL)", self.ds_url_input, "供应商的 API 端点地址。如需使用代理可在此修改。"))
         
         self.ds_key_input = QLineEdit()
-        self.ds_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ds_key_input.setEchoMode(QLineEdit.Password)
         self.ds_key_input.setPlaceholderText("sk-...")
         layout.addLayout(self.create_form_row("API Key", self.ds_key_input, "您的专属认证密钥。"))
         
@@ -108,7 +108,7 @@ class SettingsDialog(QDialog):
     def build_zhipu_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setAlignment(Qt.AlignTop)
         
         title = QLabel("<h2>🧠 智谱 AI (GLM-4V) 配置</h2>")
         layout.addWidget(title)
@@ -123,7 +123,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(self.create_form_row("API 端点 (Base URL)", self.glm_url_input, "多模态视觉请求端点。默认：https://open.bigmodel.cn/api/paas/v4"))
         
         self.glm_key_input = QLineEdit()
-        self.glm_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.glm_key_input.setEchoMode(QLineEdit.Password)
         self.glm_key_input.setPlaceholderText("您的智谱 API Key")
         layout.addLayout(self.create_form_row("API Key", self.glm_key_input, "您的专属认证密钥。"))
         
@@ -143,7 +143,7 @@ class SettingsDialog(QDialog):
     def build_gee_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setAlignment(Qt.AlignTop)
         
         title = QLabel("<h2>🌍 Google Earth Engine 配置</h2>")
         layout.addWidget(title)
@@ -212,7 +212,7 @@ class SettingsDialog(QDialog):
         from qgis.PyQt.QtWidgets import QTextEdit
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setAlignment(Qt.AlignTop)
         
         title = QLabel("<h2>🧬 AI 记忆与性格 (Memory & Personality)</h2>")
         layout.addWidget(title)
@@ -231,7 +231,7 @@ class SettingsDialog(QDialog):
         
         layout.addWidget(QLabel("<b>全局经验池 (Global Memory)</b> - 跨项目的共有常识或避坑指南"))
         self.global_memory_input = QTextEdit()
-        self.global_memory_input.setPlaceholderText("例如：QGIS 4.0 中某个 API 的名称变了...")
+        self.global_memory_input.setPlaceholderText("例如：QGIS 3.44 中某个 API 的名称变了...")
         self.global_memory_input.setMaximumHeight(100)
         layout.addWidget(self.global_memory_input)
         
@@ -247,7 +247,7 @@ class SettingsDialog(QDialog):
         from qgis.PyQt.QtWidgets import QCheckBox
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setAlignment(Qt.AlignTop)
         
         title = QLabel("<h2>🔄 检查更新 (Updates)</h2>")
         layout.addWidget(title)
@@ -332,9 +332,26 @@ class SettingsDialog(QDialog):
         self.dl_path_input.setText(self.settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘"))
 
         self.personality_input.setPlainText(self.settings.value("qgis_agent/agent_personality", ""))
-        self.global_memory_input.setPlainText(self.settings.value("qgis_agent/agent_memory", ""))
-        prj_mem, _ = QgsProject.instance().readEntry("QGIS_Agent", "project_memory", "")
-        self.project_memory_input.setPlainText(prj_mem)
+        import os
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        user_md_path = os.path.join(plugin_dir, "USER.md")
+        if os.path.exists(user_md_path):
+            with open(user_md_path, "r", encoding="utf-8") as f:
+                self.global_memory_input.setPlainText(f.read())
+        else:
+            self.global_memory_input.setPlainText("")
+            
+        from qgis.core import QgsProject
+        project_home = QgsProject.instance().homePath()
+        if project_home:
+            memory_md_path = os.path.join(project_home, "MEMORY.md")
+            if os.path.exists(memory_md_path):
+                with open(memory_md_path, "r", encoding="utf-8") as f:
+                    self.project_memory_input.setPlainText(f.read())
+            else:
+                self.project_memory_input.setPlainText("")
+        else:
+            self.project_memory_input.setPlainText("项目未保存，无法加载项目记忆。")
         
         # 加载自动更新设置
         auto_update = self.settings.value("qgis_agent/auto_check_update", False, type=bool)
@@ -349,10 +366,24 @@ class SettingsDialog(QDialog):
         self.settings.setValue("qgis_agent/glm_vision_model", self.glm_vision_combo.currentData())
         
         self.settings.setValue("qgis_agent/agent_personality", self.personality_input.toPlainText())
-        self.settings.setValue("qgis_agent/agent_memory", self.global_memory_input.toPlainText())
-        
+        import os
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        user_md_path = os.path.join(plugin_dir, "USER.md")
+        try:
+            with open(user_md_path, "w", encoding="utf-8") as f:
+                f.write(self.global_memory_input.toPlainText())
+        except Exception:
+            pass
+            
         from qgis.core import QgsProject
-        QgsProject.instance().writeEntry("QGIS_Agent", "project_memory", self.project_memory_input.toPlainText())
+        project_home = QgsProject.instance().homePath()
+        if project_home:
+            memory_md_path = os.path.join(project_home, "MEMORY.md")
+            try:
+                with open(memory_md_path, "w", encoding="utf-8") as f:
+                    f.write(self.project_memory_input.toPlainText())
+            except Exception:
+                pass
         
         self.settings.setValue("qgis_agent/gee_download_strategy", self.dl_strategy_combo.currentData())
         self.settings.setValue("qgis_agent/gee_drive_sync_path", self.dl_path_input.text().strip())
@@ -363,36 +394,13 @@ class SettingsDialog(QDialog):
         
     def reauthenticate_gee(self):
         from .gee_bridge import GEEAuth
-        from qgis.PyQt.QtWidgets import QMessageBox, QPushButton
+        from qgis.PyQt.QtWidgets import QMessageBox
         try:
             if GEEAuth.authenticate_and_initialize(force=True):
                 self.load_settings()
                 QMessageBox.information(self, "GEE", "GEE 认证成功！")
         except Exception as e:
-            err_str = str(e)
-            if "10013" in err_str or "10048" in err_str:
-                msg = QMessageBox(self)
-                msg.setIcon(QMessageBox.Critical)
-                msg.setWindowTitle("网络端口被拦截")
-                msg.setText("您的系统环境（如代理软件的 TUN 模式、或防火墙）拦截了本地端口，导致 QGIS 无法完成认证。")
-                msg.setInformativeText("为您提供了一个【傻瓜式修复方案】：\n点击下方按钮，会自动弹出一个黑色终端窗口进行认证。\n认证完成后重启 QGIS 即可。")
-                
-                fix_btn = msg.addButton("👉 一键打开终端进行认证", QMessageBox.ActionRole)
-                msg.addButton(QMessageBox.Cancel)
-                
-                msg.exec_()
-                
-                if msg.clickedButton() == fix_btn:
-                    import subprocess
-                    import sys
-                    try:
-                        cmd = f'start "GEE 终端认证 (请在弹出的网页授权)" "{sys.executable}" -m earthengine authenticate'
-                        subprocess.Popen(cmd, shell=True)
-                        QMessageBox.information(self, "提示", "终端已成功打开！\n请在自动弹出的网页中完成授权。\n\n授权成功后，请关闭终端并重启 QGIS！")
-                    except Exception as ex:
-                        QMessageBox.critical(self, "错误", f"无法启动终端：{ex}")
-            else:
-                QMessageBox.critical(self, "GEE 错误", err_str)
+            QMessageBox.critical(self, "GEE 错误", str(e))
             
     def clear_gee_auth(self):
         from .gee_bridge import clear_gee_auth as bridge_clear

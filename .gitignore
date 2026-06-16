@@ -27,6 +27,9 @@ dist/
 
 # Test Data
 test_data/
+test/
+temp_images/
+qgis_agent_plugin/temp_images/
 *.log
 *.sqlite
 *.gpkg

@@ -76,7 +76,7 @@ class QGISAIAgentPlugin:
         if not self.dockwidget:
             from .chat_dockwidget import ChatDockWidget
             self.dockwidget = ChatDockWidget(self.iface.mainWindow())
-            self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dockwidget)
+            self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dockwidget)
             self.dockwidget.send_message_signal.connect(self.handle_user_message)
             self.dockwidget.action_panel_signal.connect(self.handle_action_panel)
             self.dockwidget.stop_agent_signal.connect(self.handle_stop_agent)
@@ -270,8 +270,46 @@ class QGISAIAgentPlugin:
         
         f = io.StringIO()
         try:
-            with redirect_stdout(f):
-                exec(code, env_dict)
+            import ast
+            class SecurityASTVisitor(ast.NodeVisitor):
+                def visit_Call(self, node):
+                    if isinstance(node.func, ast.Attribute) and node.func.attr == 'sleep':
+                        raise RuntimeError("UIFreezeError: 检测到 time.sleep() 或类似的轮询循环！这会彻底卡死 QGIS 主线程！请立刻停止手动轮询，必须改用 qgis_agent_plugin.gee_bridge.GEEDownloader 进行下载。")
+                    if isinstance(node.func, ast.Name) and node.func.id == 'sleep':
+                        raise RuntimeError("UIFreezeError: 检测到 sleep() 或类似的轮询循环！这会彻底卡死 QGIS 主线程！请立刻停止手动轮询，必须改用 qgis_agent_plugin.gee_bridge.GEEDownloader 进行下载。")
+                    self.generic_visit(node)
+                    
+            try:
+                tree = ast.parse(code)
+                SecurityASTVisitor().visit(tree)
+                
+                # Auto-inject QCoreApplication.processEvents() into all loops to prevent UI freeze
+                class LoopInjector(ast.NodeTransformer):
+                    def visit_For(self, node):
+                        self.generic_visit(node)
+                        stmt = ast.parse('import qgis.PyQt.QtCore as _qtcore; _qtcore.QCoreApplication.processEvents()').body
+                        node.body = stmt + node.body
+                        return node
+                    def visit_While(self, node):
+                        self.generic_visit(node)
+                        stmt = ast.parse('import qgis.PyQt.QtCore as _qtcore; _qtcore.QCoreApplication.processEvents()').body
+                        node.body = stmt + node.body
+                        return node
+                tree = LoopInjector().visit(tree)
+                ast.fix_missing_locations(tree)
+                if hasattr(ast, 'unparse'):
+                    code = ast.unparse(tree)
+            except Exception:
+                pass # Let exec() handle syntax errors
+                
+            from qgis.PyQt.QtWidgets import QApplication
+            from qgis.PyQt.QtCore import Qt
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                with redirect_stdout(f):
+                    exec(code, env_dict)
+            finally:
+                QApplication.restoreOverrideCursor()
                 
             stdout_str = f.getvalue().strip()
             
@@ -284,14 +322,35 @@ class QGISAIAgentPlugin:
                 output = f"Code executed successfully.\nStandard Output:\n{stdout_str}{sys_logs}"
             else:
                 output = f"Code executed successfully.{sys_logs}"
+                
+            if getattr(self, 'previous_execution_failed', False):
+                output += "\n\n[SYSTEM: 你的代码终于执行成功了！但这说明你刚才犯了错并完成了自我修正。在此刻，你【必须】立刻停下手中的主线任务，优先使用 write_file 工具将错误原因和修复代码写入 MEMORY.md！不准直接进行下一步！]"
+            self.previous_execution_failed = False
         except Exception as e:
+            self.previous_execution_failed = True
             stdout_str = f.getvalue().strip()
             tb = traceback.format_exc()
             if stdout_str:
-                output = f"Error executing code:\n{tb}\nStandard Output before error:\n{stdout_str}"
+                output = f"[EXECUTION_FAILED_TRACEBACK]\n{tb}\nStandard Output before error:\n{stdout_str}"
             else:
-                output = f"Error executing code:\n{tb}"
-            output += "\n\n[SYSTEM REMINDER: If you successfully fix this error in your next attempt, you MUST call `update_agent_memory` immediately to document what went wrong and how you fixed it!]"
+                output = f"[EXECUTION_FAILED_TRACEBACK]\n{tb}"
+                
+            if "ee." in tb:
+                try:
+                    import re
+                    from .tools import execute_atomic_tool
+                    matches = re.findall(r'ee\.[a-zA-Z0-9_\.]+', tb)
+                    if matches:
+                        # Find the most specific API mentioned
+                        best_match = sorted(matches, key=len, reverse=True)[0]
+                        search_term = best_match.split('.')[-1]
+                        fallback_info = execute_atomic_tool(self.iface, "search_gee_api", {"query": search_term})
+                        if not fallback_info.startswith("No API found") and not fallback_info.startswith("Error") and not fallback_info.startswith("Failed"):
+                            output += f"\n\n[GEE API FALLBACK (AUTO-RETRIEVED)]\nIt looks like a GEE API call failed. Here is the official signature for `{best_match}` (and related) to help you fix it:\n\n{fallback_info}"
+                except Exception:
+                    pass
+                    
+            output += "\n\n[SYSTEM REMINDER: If you successfully fix this error in your next attempt, you MUST use the `replace_file_content` or `write_file` tool to document what went wrong and how you fixed it into `MEMORY.md` immediately!]"
         finally:
             # Always disconnect the interceptor
             try:
@@ -314,34 +373,28 @@ class QGISAIAgentPlugin:
             return os.path.join(self.plugin_dir, "untitled.agent.json")
 
     def save_memory(self):
-        import json
-        import os
-        mem_path = self._get_memory_path()
         try:
+            from .sqlite_memory import SqliteMemoryDB
+            db = SqliteMemoryDB()
             if self.harness_thread and self.harness_thread.isRunning():
-                # Save from active thread
                 messages_to_save = [m for m in self.harness_thread.messages if m.get("role") != "system"]
             else:
                 messages_to_save = [m for m in self.global_messages if m.get("role") != "system"]
                 
-            with open(mem_path, 'w', encoding='utf-8') as f:
-                json.dump(messages_to_save, f, ensure_ascii=False, indent=2)
-            self.logger.info(f"Saved sandbox memory to {mem_path}")
+            db.save_messages(messages_to_save)
+            self.logger.info("Saved sandbox memory to SQLite")
         except Exception as e:
             self.logger.error(f"Failed to save sandbox memory: {e}")
 
     def load_memory(self):
-        import json
-        import os
-        mem_path = self._get_memory_path()
         self.global_messages = []
-        if os.path.exists(mem_path):
-            try:
-                with open(mem_path, 'r', encoding='utf-8') as f:
-                    self.global_messages = json.load(f)
-                self.logger.info(f"Loaded sandbox memory from {mem_path}")
-            except Exception as e:
-                self.logger.error(f"Failed to load sandbox memory: {e}")
+        try:
+            from .sqlite_memory import SqliteMemoryDB
+            db = SqliteMemoryDB()
+            self.global_messages = db.load_messages()
+            self.logger.info("Loaded sandbox memory from SQLite")
+        except Exception as e:
+            self.logger.error(f"Failed to load sandbox memory: {e}")
                 
         if self.dockwidget:
             self.dockwidget.load_history(self.global_messages)

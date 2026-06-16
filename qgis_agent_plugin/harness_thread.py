@@ -27,6 +27,7 @@ class HarnessThread(QThread):
         
         self.user_input = ""
         self.model_name = "DeepSeek-Chat"
+        self.effort_level = "High"
         self.work_mode = "PLAN"
         self.messages = existing_messages if existing_messages is not None else []
         self.plan_approved = False
@@ -141,25 +142,99 @@ class HarnessThread(QThread):
             }
         })
         
+
+        
         self.tools.append({
             "type": "function",
             "function": {
-                "name": "update_agent_memory",
-                "description": "Write a lesson learned or a user preference to the agent's long-term memory so you don't make the same mistake twice. Use this proactively when the user corrects your code or specifies a rule.",
+                "name": "read_file",
+                "description": "Read the contents of a local file.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "scope": {
-                            "type": "string",
-                            "description": "Must be 'global' (applies to all projects) or 'project' (specific to the current QGIS project)",
-                            "enum": ["global", "project"]
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "The exact rule or lesson to append. Example: 'Do not use QgsComboBox, use QComboBox from qgis.PyQt.QtWidgets'"
-                        }
+                        "file_path": {"type": "string", "description": "Absolute path to the file."}
                     },
-                    "required": ["scope", "content"]
+                    "required": ["file_path"]
+                }
+            }
+        })
+        
+        self.tools.append({
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write text content to a local file (overwrites existing).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Absolute path to the file."},
+                        "content": {"type": "string", "description": "The text content to write."}
+                    },
+                    "required": ["file_path", "content"]
+                }
+            }
+        })
+        
+        self.tools.append({
+            "type": "function",
+            "function": {
+                "name": "replace_file_content",
+                "description": "Replace a specific substring in a local file with new content. Useful for checking off items in task.md.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Absolute path to the file."},
+                        "target_content": {"type": "string", "description": "The exact string to be replaced."},
+                        "replacement_content": {"type": "string", "description": "The new string to insert."}
+                    },
+                    "required": ["file_path", "target_content", "replacement_content"]
+                }
+            }
+        })
+        
+        self.tools.append({
+            "type": "function",
+            "function": {
+                "name": "save_skill",
+                "description": "Save a reusable, successful PyQGIS snippet to your Procedural Skills library.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name": {"type": "string", "description": "A short, unique filename for the skill (e.g., 'buffer_and_clip')."},
+                        "description": {"type": "string", "description": "A detailed description of what the skill does and what inputs it expects."},
+                        "python_code": {"type": "string", "description": "The complete, working PyQGIS Python code to save."}
+                    },
+                    "required": ["skill_name", "description", "python_code"]
+                }
+            }
+        })
+        
+        self.tools.append({
+            "type": "function",
+            "function": {
+                "name": "search_skills",
+                "description": "Search your Procedural Skills library for previously saved scripts.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search keywords (e.g., 'buffer', 'network analysis')."}
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+        
+        self.tools.append({
+            "type": "function",
+            "function": {
+                "name": "search_past_conversations",
+                "description": "Search past conversation history from the SQLite Episodic Memory database.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Keywords to search in previous chats or tool outputs."}
+                    },
+                    "required": ["query"]
                 }
             }
         })
@@ -168,25 +243,40 @@ class HarnessThread(QThread):
         from qgis.core import QgsSettings, QgsProject
         settings = QgsSettings()
         personality = settings.value("qgis_agent/agent_personality", "")
-        global_memory = settings.value("qgis_agent/agent_memory", "")
-        project_memory, _ = QgsProject.instance().readEntry("QGIS_Agent", "project_memory", "")
+        project_home = QgsProject.instance().homePath()
 
         base_prompt = "You are an advanced PyQGIS Agent. You can execute python code directly in the QGIS Python environment.\n"
         
         if personality:
             base_prompt += f"\n### [USER DEFINED PERSONALITY & RULES] ###\n{personality}\n"
         
-        if global_memory or project_memory:
-            base_prompt += "\n### 🧠 [YOUR LONG-TERM MEMORY & PREVIOUS LESSONS] ###\n"
-            base_prompt += "These rules represent your past mistakes or user preferences. You MUST adhere to them.\n"
-            if global_memory:
-                base_prompt += f"\n-- Global Memory --\n{global_memory}\n"
-            if project_memory:
-                base_prompt += f"\n-- Current Project Memory --\n{project_memory}\n"
+        # Inject Durable Curated Memory (Hermes Architecture)
+        base_prompt += "\n### 🧠 [DURABLE CURATED MEMORY] ###\n"
+        base_prompt += "These markdown files represent your long-term memory. You MUST adhere to the rules within them.\n"
+        base_prompt += "If you learn new facts, environment quirks, or user preferences, you MUST proactively use the `write_file` or `replace_file_content` tools to update these files so you don't forget!\n\n"
+        
+        import os
+        user_md_path = os.path.join(self.plugin_dir, "USER.md")
+        
+        if os.path.exists(user_md_path):
+            with open(user_md_path, "r", encoding="utf-8") as f:
+                base_prompt += f"-- USER.md (Global User Preferences/Facts, Absolute Path: `{user_md_path}`) --\n{f.read()}\n\n"
+        else:
+            base_prompt += f"-- USER.md --\n(No global preferences recorded yet. You can create this file using `write_file` at its absolute path: `{user_md_path}`)\n\n"
+            
+        if project_home:
+            memory_md_path = os.path.join(project_home, "MEMORY.md")
+            
+            if os.path.exists(memory_md_path):
+                with open(memory_md_path, "r", encoding="utf-8") as f:
+                    base_prompt += f"-- MEMORY.md (Project Facts & Quirks, Absolute Path: `{memory_md_path}`) --\n{f.read()}\n\n"
+            else:
+                base_prompt += f"-- MEMORY.md --\n(No project facts recorded yet. You can create this file using `write_file` at its absolute path: `{memory_md_path}`)\n\n"
+        else:
+             base_prompt += "(QGIS Project is not saved. MEMORY.md cannot be injected. Please ask the user to save the project first.)\n\n"
                 
         base_prompt += """
 - You MUST write complete, executable Python code.
-- **SELF-CORRECTION & MEMORY**: If you execute code, encounter an error, and subsequently figure out how to fix it, you MUST call the `update_agent_memory` tool to write the lesson learned to your memory immediately! Do not just fix the code and move on; you must evolve.
 - Always use `iface.messageBar().pushMessage()` to show progress to the human visually.
 - IMPORTANT: Whenever you load, create, or process a new layer (vector or raster), you MUST add it to the QGIS project (`QgsProject.instance().addMapLayer(layer)`) or use `iface.addVectorLayer()` / `iface.addRasterLayer()` so the user can see the result on their screen! Do not just save files to disk silently.
 """
@@ -200,11 +290,12 @@ class HarnessThread(QThread):
         base_prompt += "\n" + cheat_sheet + "\n"
         if self.work_mode == "PLAN":
             base_prompt += """
-### ⚠️ CRITICAL WORKFLOW (PLAN MODE & ReAct)
-1. **PLAN FIRST**: Do NOT call `execute_pyqgis_script` immediately. First, you MUST output a highly detailed, step-by-step text message explaining exactly what you plan to do. Use a Markdown checklist format (e.g., `- [ ] Step 1`).
-2. **SUBMIT PLAN**: You MUST call `submit_plan_for_approval` IMMEDIATELY after outputting your text plan to pause execution and wait for human review. DO NOT just ask questions in text without calling the tool!
-3. **RECENCY BIAS PROTECTION**: When the user provides feedback to modify your plan, you MUST retain the original overarching goal and merge the new feedback into a complete, updated checklist. Do NOT drop the original task!
-4. **EXECUTE & VERIFY (ReAct)**: After the plan is approved, do NOT execute all steps in a single massive script! Execute ONE step at a time using your tools. After each step, verify the result, check off the item in your markdown list, and then proceed to the next step.
+### ⚠️ CRITICAL WORKFLOW (PLAN MODE & ARTIFACT TRACKING)
+1. **PLAN FIRST**: Do NOT call `execute_pyqgis_script` to solve the problem immediately! First, you MUST create an `implementation_plan.md` artifact in the QGIS project root using the `write_file` tool. Detail the background context, proposed changes, and a markdown checklist of steps.
+2. **SUBMIT PLAN**: You MUST call `submit_plan_for_approval` IMMEDIATELY after writing your plan to pause execution and wait for human review. DO NOT proceed without calling this tool!
+3. **TASK ARTIFACT**: Once the user approves the plan, use `write_file` to create a `task.md` file containing your execution checklist. Use `[ ]` for pending, `[/]` for in-progress, and `[x]` for completed tasks.
+4. **EXECUTE & VERIFY (ReAct)**: Execute ONE step at a time using `execute_pyqgis_script`. After completing each step, you MUST use `replace_file_content` to update `task.md` (e.g., change `[ ] Step 1` to `[x] Step 1`).
+5. **WALKTHROUGH**: After all steps are completed, create a `walkthrough.md` summarizing what you accomplished.
 """
         else:
             base_prompt += """
@@ -212,7 +303,14 @@ class HarnessThread(QThread):
 You are in auto-execute mode. You DO NOT need to submit plans for approval. You can directly call `execute_pyqgis_script` to fulfill the user's request immediately.
 """
         # Clean existing system prompts to avoid duplicates across restarts
-        self.messages = [m for m in self.messages if m.get("role") != "system"]
+        self.messages[:] = [m for m in self.messages if m.get("role") != "system"]
+        
+        # Self-heal corrupted memory from huge outputs that crash the LLM API
+        for m in self.messages:
+            if isinstance(m.get("content"), str) and len(m["content"]) > 15000:
+                original_len = len(m["content"])
+                m["content"] = m["content"][:5000] + f"\n\n...[Output middle truncated! Original length: {original_len} chars. Too long for context.]...\n\n" + m["content"][-5000:]
+                
         self.messages.insert(0, {"role": "system", "content": base_prompt})
 
     def _get_qgis_context(self):
@@ -268,6 +366,47 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                 
         return "\n".join(context)
 
+    def _get_auto_rag_context(self, user_text):
+        context_parts = []
+        try:
+            from .sqlite_memory import SqliteMemoryDB
+            mem_db = SqliteMemoryDB()
+            # Extract basic keywords from prompt for searching (simplistic approach)
+            import re
+            # Filter out common stop words or very short words
+            keywords = [w for w in re.split(r'\W+', user_text) if len(w) > 1][:5]
+            if keywords:
+                query = " OR ".join(keywords)
+                # 1. Search Episodic Memory
+                past_conv = mem_db.search_conversations(query, limit=2)
+                if past_conv and not past_conv.startswith("Error") and not past_conv.startswith("No past"):
+                    context_parts.append(f"--- Similar Past Conversations ---\n{past_conv}")
+                
+                # 2. Search Skills
+                from qgis.core import QgsProject
+                import os, json
+                prj_home = QgsProject.instance().homePath()
+                if prj_home:
+                    index_file = os.path.join(prj_home, "agent_skills", "skills_index.json")
+                    if os.path.exists(index_file):
+                        with open(index_file, "r", encoding="utf-8") as f:
+                            index_data = json.load(f)
+                        matches = []
+                        for s_name, s_info in index_data.items():
+                            if any(k.lower() in s_name.lower() or k.lower() in s_info.get("description", "").lower() for k in keywords):
+                                code_path = os.path.join(prj_home, "agent_skills", s_info["file"])
+                                if os.path.exists(code_path):
+                                    with open(code_path, "r", encoding="utf-8") as cf:
+                                        matches.append(f"Skill: {s_name}\nCode:\n```python\n{cf.read()}\n```")
+                        if matches:
+                            context_parts.append(f"--- Relevant Procedural Skills ---\n" + "\n\n".join(matches[:2]))
+        except Exception as e:
+            self.logger.warning(f"Auto-RAG failed: {e}")
+            
+        if context_parts:
+            return "[System Auto-RAG (Passive Memory Injection)]\n" + "\n\n".join(context_parts)
+        return ""
+
     def _init_client(self):
         from qgis.core import QgsSettings
         s = QgsSettings()
@@ -289,6 +428,12 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
             
         self.logger.info(f"User Input: {self.user_input}")
         
+        # Process Meltdown "Continue" Trigger
+        continue_keywords = ["继续尝试", "继续", "再试一次", "再试", "keep trying", "try again", "continue"]
+        if any(k in self.user_input.lower() for k in continue_keywords):
+            lateral_prompt = "\n\n[System Auto-Trigger]: 之前的方法已经证明彻底失效（已熔断）。由于用户要求继续尝试，你现在【必须】彻底放弃之前的代码架构和使用的类库。请尝试使用完全不同的替代方案（例如：放弃 PyQGIS 接口，改用原生 GDAL/OGR 处理；或者换一个不同的算法处理逻辑）。"
+            self.user_input += lateral_prompt
+            
         # Process @ mentions
         self.ghost_context = self._process_mentions(self.user_input)
         if self.ghost_context:
@@ -335,6 +480,13 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                 self.user_input = self.user_input.replace(img_match.group(0), f"\n\n[Exception analyzing image: {str(e)}]")
             
         self._prepare_messages()
+        
+        # Process Auto-Reflection Trigger
+        completion_keywords = ["完成", "结束", "好了", "done", "finish"]
+        if any(k in self.user_input.lower() for k in completion_keywords):
+            reflection_prompt = "\n\n[System Auto-Trigger]: The user indicates the current task might be completed. Please take a moment to reflect on any new constraints, project quirks, or user preferences you learned during this session. If there are new insights, you MUST use the `write_file` or `replace_file_content` tool to update MEMORY.md or USER.md before asking the user for their next task."
+            self.user_input += reflection_prompt
+            
         self.messages.append({"role": "user", "content": self.user_input})
         
         try:
@@ -347,10 +499,42 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                 self.append_message_signal.emit("SYSTEM", "Thinking...")
                 
                 # Inject dynamic QGIS context into the messages before sending
-                messages_to_send = self.messages.copy()
+                # Inject dynamic QGIS context into the messages before sending
+                # DYNAMIC SLIDING WINDOW: Keep System Prompt + Recent messages up to ~40000 chars to prevent context overflow
+                messages_to_send = []
+                system_msgs = [m for m in self.messages if m.get("role") == "system"]
+                other_msgs = [m for m in self.messages if m.get("role") != "system"]
+                
+                messages_to_send.extend(system_msgs)
+                
+                # Dynamic accumulation from the end
+                char_limit = 40000
+                current_chars = 0
+                dynamic_other_msgs = []
+                
+                for m in reversed(other_msgs):
+                    m_len = len(str(m.get("content", "")))
+                    if current_chars + m_len > char_limit and len(dynamic_other_msgs) > 0:
+                        break
+                    dynamic_other_msgs.insert(0, m)
+                    current_chars += m_len
+                    
+                # Fix API Error 400: Truncation might leave orphaned "tool" messages at the beginning 
+                # without their preceding "assistant" tool_calls message.
+                while dynamic_other_msgs and dynamic_other_msgs[0].get("role") == "tool":
+                    dynamic_other_msgs.pop(0)
+                    
+                messages_to_send.extend(dynamic_other_msgs)
+                
                 dynamic_context = self._get_qgis_context()
                 if getattr(self, "ghost_context", None):
                     dynamic_context += "\n\n[System Auto-Injected Context based on @ Mentions]:\n" + self.ghost_context
+                
+                # Inject Auto-RAG
+                auto_rag = self._get_auto_rag_context(self.user_input)
+                if auto_rag:
+                    dynamic_context += "\n\n" + auto_rag
+                    
                 messages_to_send.append({"role": "system", "content": dynamic_context})
                 
                 real_model_name = self.model_name.split(" ")[0]
@@ -472,20 +656,7 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                         msg_dict["tool_calls"] = [mock_tc]
                         msg_wrapped.tool_calls = [mock_tc]
                         self.logger.info("Auto-parsed python block into tool_calls for model that forgot tool API.")
-                    elif self.work_mode == "PLAN" and not getattr(self, "plan_approved", False):
-                        # The model is in PLAN mode, hasn't approved a plan yet, and outputted text without calling submit_plan_for_approval.
-                        # Forcefully wrap it in a submit_plan_for_approval tool call!
-                        mock_tc = {
-                            "id": f"call_{uuid.uuid4().hex[:10]}",
-                            "type": "function",
-                            "function": {
-                                "name": "submit_plan_for_approval",
-                                "arguments": "{}"
-                            }
-                        }
-                        msg_dict["tool_calls"] = [mock_tc]
-                        msg_wrapped.tool_calls = [mock_tc]
-                        self.logger.info("Auto-injected submit_plan_for_approval because model forgot to call it.")
+
                     else:
                         self.logger.info("Agent stopped without tool calls. Yielding turn to user.")
                         break
@@ -503,7 +674,17 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                             self.function.arguments = t["function"]["arguments"]
                     tool_call = ToolCallWrapper(tc_dict)
                     name = tool_call.function.name
-                    args = json.loads(tool_call.function.arguments)
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"JSON decode error for tool {name}: {e}")
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": f"JSON decode error in arguments: {e}. Please ensure you output valid JSON."
+                        })
+                        continue
                     
                     if name == "ask_human":
                         question = args.get("question", "")
@@ -575,35 +756,7 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                             "content": result
                         })
 
-                    elif name == "update_agent_memory":
-                        scope = args.get("scope", "global")
-                        content = args.get("content", "")
-                        self.logger.info(f"Agent updating memory ({scope}): {content}")
-                        
-                        from qgis.core import QgsSettings, QgsProject
-                        if scope == "global":
-                            settings = QgsSettings()
-                            current_mem = settings.value("qgis_agent/agent_memory", "")
-                            new_mem = current_mem + f"\n- {content}" if current_mem else f"- {content}"
-                            settings.setValue("qgis_agent/agent_memory", new_mem)
-                            result = "Global memory successfully updated."
-                        else:
-                            prj = QgsProject.instance()
-                            current_mem, _ = prj.readEntry("QGIS_Agent", "project_memory", "")
-                            new_mem = current_mem + f"\n- {content}" if current_mem else f"- {content}"
-                            prj.writeEntry("QGIS_Agent", "project_memory", new_mem)
-                            result = "Project memory successfully updated."
-                            
-                        self.append_message_signal.emit("SYSTEM", f"🧠 记忆已进化 ({scope}): {content}")
-                        
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": name,
-                            "content": result
-                        })
-
-                    elif name in ["list_layers", "zoom_to_layer", "set_layer_visibility", "take_qgis_window_snapshot", "inspect_layer_fields", "get_selected_features", "select_features_by_expression", "clear_selection", "zoom_to_selected", "run_processing_algorithm", "create_geodatabase", "query_pyqgis_doc", "download_osm_data"]:
+                    elif name in ["list_layers", "zoom_to_layer", "set_layer_visibility", "take_qgis_window_snapshot", "inspect_layer_fields", "get_selected_features", "select_features_by_expression", "clear_selection", "zoom_to_selected", "run_processing_algorithm", "create_geodatabase", "query_pyqgis_doc", "download_osm_data", "search_gee_python_api"]:
                         self.logger.info(f"Executing atomic tool: {name}")
                         self.atomic_tool_event.clear()
                         self.request_atomic_tool_signal.emit(name, args)
@@ -644,6 +797,213 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                             except Exception as e:
                                 result = f"Vision API Exception: {str(e)}"
                                 
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": result
+                        })
+                        
+                    elif name == "read_file":
+                        file_path = args.get("file_path", "")
+                        
+                        import os
+                        from qgis.core import QgsProject
+                        # Smart path resolution for LLM
+                        if file_path == "MEMORY.md" or file_path == "./MEMORY.md":
+                            if QgsProject.instance().homePath():
+                                file_path = os.path.join(QgsProject.instance().homePath(), "MEMORY.md")
+                        elif file_path == "USER.md" or file_path == "./USER.md":
+                            file_path = os.path.join(self.plugin_dir, "USER.md")
+                        elif not os.path.isabs(file_path) and QgsProject.instance().homePath():
+                            file_path = os.path.join(QgsProject.instance().homePath(), file_path)
+                            
+                        self.logger.info(f"Agent reading file: {file_path}")
+                        try:
+                            import os
+                            if not os.path.exists(file_path):
+                                result = f"Error: File not found at {file_path}"
+                            else:
+                                with open(file_path, "r", encoding="utf-8") as f:
+                                    result = f.read()
+                        except Exception as e:
+                            result = f"Error reading file: {str(e)}"
+                        
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": result
+                        })
+                        
+                    elif name == "write_file":
+                        file_path = args.get("file_path", "")
+                        content = args.get("content", "")
+                        
+                        import os
+                        from qgis.core import QgsProject
+                        # Smart path resolution for LLM
+                        if file_path == "MEMORY.md" or file_path == "./MEMORY.md":
+                            if QgsProject.instance().homePath():
+                                file_path = os.path.join(QgsProject.instance().homePath(), "MEMORY.md")
+                        elif file_path == "USER.md" or file_path == "./USER.md":
+                            file_path = os.path.join(self.plugin_dir, "USER.md")
+                        elif not os.path.isabs(file_path) and QgsProject.instance().homePath():
+                            file_path = os.path.join(QgsProject.instance().homePath(), file_path)
+                            
+                        self.logger.info(f"Agent writing file: {file_path}")
+                        try:
+                            import os
+                            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                            with open(file_path, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            result = f"Successfully wrote to {file_path}"
+                            if file_path.endswith(".md"):
+                                self.append_message_signal.emit("AGENT", f"📝 **[Artifact Created: {os.path.basename(file_path)}]**\n\n{content}")
+                        except Exception as e:
+                            result = f"Error writing file: {str(e)}"
+                            
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": result
+                        })
+                        
+                    elif name == "replace_file_content":
+                        file_path = args.get("file_path", "")
+                        
+                        import os
+                        from qgis.core import QgsProject
+                        # Smart path resolution for LLM
+                        if file_path == "MEMORY.md" or file_path == "./MEMORY.md":
+                            if QgsProject.instance().homePath():
+                                file_path = os.path.join(QgsProject.instance().homePath(), "MEMORY.md")
+                        elif file_path == "USER.md" or file_path == "./USER.md":
+                            file_path = os.path.join(self.plugin_dir, "USER.md")
+                        elif not os.path.isabs(file_path) and QgsProject.instance().homePath():
+                            file_path = os.path.join(QgsProject.instance().homePath(), file_path)
+                            
+                        target_content = args.get("target_content", "")
+                        replacement_content = args.get("replacement_content", "")
+                        self.logger.info(f"Agent replacing content in: {file_path}")
+                        try:
+                            import os
+                            if not os.path.exists(file_path):
+                                result = f"Error: File not found at {file_path}"
+                            else:
+                                with open(file_path, "r", encoding="utf-8") as f:
+                                    file_data = f.read()
+                                
+                                if target_content not in file_data:
+                                    result = "Error: target_content not found in file."
+                                else:
+                                    file_data = file_data.replace(target_content, replacement_content)
+                                    with open(file_path, "w", encoding="utf-8") as f:
+                                        f.write(file_data)
+                                    result = f"Successfully replaced content in {file_path}"
+                                    if file_path.endswith(".md"):
+                                        self.append_message_signal.emit("AGENT", f"📝 **[Artifact Updated: {os.path.basename(file_path)}]**\n\n```diff\n- {target_content.strip()}\n+ {replacement_content.strip()}\n```")
+                        except Exception as e:
+                            result = f"Error replacing content: {str(e)}"
+                            
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": result
+                        })
+
+                    elif name == "save_skill":
+                        skill_name = args.get("skill_name", "")
+                        description = args.get("description", "")
+                        python_code = args.get("python_code", "")
+                        self.logger.info(f"Agent saving skill: {skill_name}")
+                        try:
+                            from qgis.core import QgsProject
+                            import os, json
+                            prj_home = QgsProject.instance().homePath()
+                            if not prj_home:
+                                result = "Error: QGIS Project is not saved. Cannot save skills without a project directory."
+                            else:
+                                skills_dir = os.path.join(prj_home, "agent_skills")
+                                os.makedirs(skills_dir, exist_ok=True)
+                                
+                                skill_file = os.path.join(skills_dir, f"{skill_name}.py")
+                                with open(skill_file, "w", encoding="utf-8") as f:
+                                    f.write(python_code)
+                                    
+                                index_file = os.path.join(skills_dir, "skills_index.json")
+                                index_data = {}
+                                if os.path.exists(index_file):
+                                    with open(index_file, "r", encoding="utf-8") as f:
+                                        index_data = json.load(f)
+                                        
+                                index_data[skill_name] = {"description": description, "file": f"{skill_name}.py"}
+                                with open(index_file, "w", encoding="utf-8") as f:
+                                    json.dump(index_data, f, ensure_ascii=False, indent=2)
+                                    
+                                result = f"Successfully saved skill '{skill_name}' to {skills_dir}"
+                        except Exception as e:
+                            result = f"Error saving skill: {str(e)}"
+                            
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": result
+                        })
+                        
+                    elif name == "search_skills":
+                        query = args.get("query", "").lower()
+                        self.logger.info(f"Agent searching skills for: {query}")
+                        try:
+                            from qgis.core import QgsProject
+                            import os, json
+                            prj_home = QgsProject.instance().homePath()
+                            if not prj_home:
+                                result = "Error: QGIS Project is not saved."
+                            else:
+                                index_file = os.path.join(prj_home, "agent_skills", "skills_index.json")
+                                if not os.path.exists(index_file):
+                                    result = "No skills library found in this project."
+                                else:
+                                    with open(index_file, "r", encoding="utf-8") as f:
+                                        index_data = json.load(f)
+                                        
+                                    matches = []
+                                    for s_name, s_info in index_data.items():
+                                        if query in s_name.lower() or query in s_info.get("description", "").lower():
+                                            code_path = os.path.join(prj_home, "agent_skills", s_info["file"])
+                                            if os.path.exists(code_path):
+                                                with open(code_path, "r", encoding="utf-8") as cf:
+                                                    code = cf.read()
+                                                matches.append(f"--- Skill: {s_name} ---\nDescription: {s_info['description']}\nCode:\n```python\n{code}\n```")
+                                                
+                                    if matches:
+                                        result = "Found the following skills:\n\n" + "\n\n".join(matches)
+                                    else:
+                                        result = f"No skills found matching '{query}'."
+                        except Exception as e:
+                            result = f"Error searching skills: {str(e)}"
+                            
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": result
+                        })
+                        
+                    elif name == "search_past_conversations":
+                        query = args.get("query", "")
+                        self.logger.info(f"Agent searching episodic memory for: {query}")
+                        try:
+                            from .sqlite_memory import SqliteMemoryDB
+                            db = SqliteMemoryDB()
+                            result = db.search_conversations(query)
+                        except Exception as e:
+                            result = f"Error searching memory: {str(e)}"
+                            
                         self.messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -703,6 +1063,10 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                         code = args.get("code", "")
                         is_destructive = args.get("is_destructive", False)
                         
+                        import re
+                        if re.search(r'\b(os\.remove|os\.unlink|os\.rmdir|shutil\.rmtree)\b', code):
+                            is_destructive = True
+                            
                         self.logger.debug(f"Agent attempting to execute code (Destructive: {is_destructive}):\n{code}")
                         
                         if is_destructive:
@@ -735,24 +1099,57 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                         
                         # Phase 17: Self-Healing
                         break_outer_loop = False
-                        if "Error executing script:" in output or "Traceback " in output or output.startswith("Error"):
+                        if "[EXECUTION_FAILED_TRACEBACK]" in output:
                             self._error_retries = getattr(self, "_error_retries", 0) + 1
-                            if self._error_retries >= 3:
-                                self.append_message_signal.emit("SYSTEM", "⚠️ Max error retries (3) reached. Yielding to user.")
+                            if self._error_retries >= 4:
+                                meltdown_msg = "🛑 **Agent 遇到死胡同已暂停**\n我已经连续 3 次局部修复以及 1 次全局反思均告失败。为了保护运行环境，我已主动熔断。\n你可以这样帮我：\n1. 如果你有相关的 QGIS 3.44 文档代码或 API 变化信息，请直接发给我。\n2. 授权我使用搜索工具（如 search_web）去网上查一下这个报错。\n3. 或者回复 **“继续尝试”**，我将彻底放弃当前思路，换一种全新的逻辑或算法。"
+                                self.append_message_signal.emit("SYSTEM", meltdown_msg)
                                 self.messages.append({
                                     "role": "tool",
                                     "tool_call_id": tool_call.id,
                                     "name": name,
-                                    "content": output
+                                    "content": output + "\n\n[SYSTEM] Max error retries reached. Agent execution halted. Waiting for human intervention."
                                 })
                                 self._error_retries = 0
                                 break_outer_loop = True
                                 break
+                            elif self._error_retries == 3:
+                                task_content = ""
+                                try:
+                                    import os
+                                    from qgis.core import QgsProject
+                                    proj_path = QgsProject.instance().fileName()
+                                    proj_dir = os.path.dirname(proj_path) if proj_path else os.path.expanduser("~")
+                                    task_file = os.path.join(proj_dir, "task.md")
+                                    if os.path.exists(task_file):
+                                        with open(task_file, "r", encoding="utf-8") as f:
+                                            task_content = f.read()
+                                except Exception:
+                                    pass
+                                critic_analysis = self._run_critic_agent(output, code, task_content)
+                                output = f"[SYSTEM CRITIC]: 局部修复已连续失效！启动全局反思：\n\n{critic_analysis}\n\n[SYSTEM DIRECTIVE] 请仔细阅读以上 Critic 的建议！如果错误是由上一步的脏数据引起的，请使用 `replace_file_content` 修改 `task.md` 倒退进度，并重新执行之前的步骤。"
                             else:
-                                output = output + f"\n\n[SYSTEM] Execution failed. You have {3 - self._error_retries} retries left. Please analyze the Traceback and fix the code."
+                                debugger_analysis = self._run_debugger_agent(output, code)
+                                output = f"[SYSTEM Debugger Analysis]:\n{debugger_analysis}\n\n[SYSTEM] Execution failed. You have {3 - self._error_retries} local retries left before Critic intervention. Please apply the Debugger's suggested fix."
                         else:
                             self._error_retries = 0
                         
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": name,
+                            "content": output
+                        })
+                    else:
+                        # Fallback to atomic tools
+                        from .tools import execute_atomic_tool
+                        self.logger.debug(f"Delegating tool execution to atomic tools: {name}")
+                        try:
+                            from qgis.utils import iface
+                            output = execute_atomic_tool(iface, name, args)
+                        except Exception as e:
+                            output = f"Error executing {name}: {str(e)}"
+                            
                         self.messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -777,3 +1174,65 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
     def provide_destructive_auth(self, is_approved):
         self.destructive_auth_response = is_approved
         self.destructive_auth_event.set()
+
+    def _run_debugger_agent(self, traceback_str, code_str):
+        self.append_message_signal.emit("SYSTEM", "🔍 正在调用后台 Debugger Agent 分析报错原因...")
+        prompt = f"""You are an expert QGIS Python Debugger. 
+The main agent wrote the following script which failed with an error.
+Your task is to analyze the traceback and provide a very concise explanation of what went wrong, and the corrected code.
+
+[Faulty Code]:
+{code_str}
+
+[Traceback]:
+{traceback_str}
+
+Respond in the following format:
+**Error Analysis**: (brief explanation)
+**Suggested Fix**: (how to fix it)
+**Corrected Code**: 
+```python
+(the full corrected code)
+```
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "system", "content": prompt}],
+                temperature=0.2
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Debugger Agent failed to run: {str(e)}\nRaw Traceback:\n{traceback_str}"
+
+    def _run_critic_agent(self, traceback_str, code_str, task_content):
+        self.append_message_signal.emit("SYSTEM", "🧠 局部修复失效，正在调用 Critic Agent 进行全局反思...")
+        prompt = f"""You are a Senior GIS Architect and Critic.
+The main agent has been stuck in an error loop attempting to execute a PyQGIS script. 
+The local debugger failed to fix it 2 times. Your job is to look at the bigger picture.
+
+[Task Progress (task.md)]:
+{task_content}
+
+[Current Failing Code]:
+{code_str}
+
+[Traceback]:
+{traceback_str}
+
+Analyze the situation. Is the error caused by a fundamental flaw in the input data (e.g., wrong geometry type like MultiPoint instead of Point, wrong CRS, missing fields) that was generated by a PREVIOUS step? 
+If so, instruct the main agent to STOP fixing the current code, and instead ROLLBACK to the previous step to regenerate the data correctly (e.g., by adding native:centroids or reprojecting).
+
+Respond concisely with:
+**Root Cause Analysis**: (Why is this failing repeatedly?)
+**Rollback & Fix Strategy**: (What exact steps/tools should the agent use to regenerate the previous data correctly?)
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "system", "content": prompt}],
+                temperature=0.3
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Critic Agent failed to run: {str(e)}\nRaw Traceback:\n{traceback_str}"

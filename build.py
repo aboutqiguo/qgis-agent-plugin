@@ -8,7 +8,7 @@ def build_plugin():
     output_zip = "qgis_agent_plugin_v1.0.0.zip"
     
     # 需要严格排除的文件和文件夹
-    exclude_dirs = {'__pycache__', '.git', 'test_data', 'tests'}
+    exclude_dirs = {'__pycache__', '.git', 'test_data', 'tests', 'temp_images'}
     exclude_files = {'.env', '.gitignore', 'build.py'}
     exclude_exts = {'.pyc', '.pyo'}
 
@@ -38,7 +38,7 @@ def build_plugin():
                 zipf.write(file_path, arcname)
                 print(f"  Added: {arcname}")
 
-    print(f"\n✅ Build successful! Distribution package created at: {os.path.abspath(output_zip)}")
+    print(f"\nBuild successful! Distribution package created at: {os.path.abspath(output_zip)}")
     print("Users can now install this ZIP file via QGIS -> Plugins -> Manage and Install Plugins -> Install from ZIP")
 
 if __name__ == '__main__':

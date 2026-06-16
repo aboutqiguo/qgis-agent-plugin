@@ -5,6 +5,27 @@ ATOMIC_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "search_gee_api",
+            "description": "Search the internal Google Earth Engine Python API knowledge base by keyword. Returns the official Python signatures, arguments, and descriptions for matching APIs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The API name or keyword to search for, e.g. 'randomForest', 'reduceRegion', 'ImageCollection.filter'"
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_layers",
             "description": "List all vector and raster layers in the current QGIS project.",
             "parameters": {
@@ -289,6 +310,47 @@ ATOMIC_TOOLS_SCHEMA = [
 
 def execute_atomic_tool(iface, tool_name, kwargs):
     try:
+        if tool_name == "search_gee_api":
+            query = kwargs.get("query", "").lower()
+            if not query:
+                return "Error: query is empty."
+                
+            import ee
+            try:
+                algorithms = ee.apifunction.ApiFunction.algorithms()
+            except Exception:
+                try:
+                    from .gee_bridge import init_gee
+                    init_gee()
+                    algorithms = ee.apifunction.ApiFunction.algorithms()
+                except Exception as e:
+                    return f"Failed to initialize Earth Engine to fetch algorithms. Error: {str(e)}\nPlease check GEE authentication."
+            
+            results = []
+            for name, func in algorithms.items():
+                if query in name.lower() or query in func.getSignature().get('description', '').lower():
+                    sig = func.getSignature()
+                    args_list = []
+                    for arg in sig.get('args', []):
+                        arg_name = arg.get('name')
+                        arg_type = arg.get('type')
+                        if arg.get('optional'):
+                            args_list.append(f"{arg_name}={arg_type} (optional)")
+                        else:
+                            args_list.append(f"{arg_name}={arg_type}")
+                    
+                    sig_str = f"def ee.{name}({', '.join(args_list)}) -> {sig.get('returns')}:"
+                    desc = sig.get('description', '')
+                    results.append(f"### ee.{name}\n```python\n{sig_str}\n```\n{desc}")
+                    
+                    if len(results) >= 5: # Limit to top 5 matches
+                        break
+            
+            if not results:
+                return f"No API found matching '{query}'"
+            
+            return "\n\n".join(results)
+            
         if tool_name == "list_layers":
             layers = QgsProject.instance().mapLayers().values()
             if not layers:

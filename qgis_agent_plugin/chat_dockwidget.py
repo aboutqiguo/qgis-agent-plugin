@@ -18,8 +18,8 @@ class AutoExpandingTextEdit(QTextEdit):
 
     def keyPressEvent(self, event):
         from qgis.PyQt.QtCore import Qt
-        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-            if event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            if event.modifiers() == Qt.ShiftModifier:
                 super().keyPressEvent(event)
             else:
                 self.returnPressed.emit()
@@ -40,7 +40,7 @@ class ChatDockWidget(QDockWidget):
     
     def __init__(self, parent=None):
         super().__init__("QGIS AI Agent Copilot", parent)
-        self.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         
         self.setStyleSheet("""
             QWidget { font-family: 'Segoe UI', Arial, sans-serif; }
@@ -225,7 +225,7 @@ class ChatDockWidget(QDockWidget):
         image.save(path, "PNG")
         self.attached_image_path = path
         
-        pixmap = QPixmap.fromImage(image).scaledToHeight(60, Qt.TransformationMode.SmoothTransformation)
+        pixmap = QPixmap.fromImage(image).scaledToHeight(60, Qt.SmoothTransformation)
         self.image_preview_label.setPixmap(pixmap)
         self.image_preview_label.setToolTip("Click to remove image attachment")
         self.image_preview_label.show()
@@ -269,7 +269,7 @@ class ChatDockWidget(QDockWidget):
             self.send_message_signal.emit(text, model, effort, mode)
             
     def clear_chat(self):
-        self.chat_display.setHtml("")
+        self.chat_history.setHtml("")
 
     def load_history(self, messages):
         self.clear_chat()
@@ -321,6 +321,6 @@ class ChatDockWidget(QDockWidget):
         self.set_agent_status("⚠️ Agent requires destructive operation approval!")
         reply = QMessageBox.question(self, 'Warning: Destructive Operation', 
                                      'The AI Agent is about to execute a destructive operation.\nDo you allow this?',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         self.set_agent_status("✨ Agent is thinking...", is_running=True)
-        return reply == QMessageBox.StandardButton.Yes
+        return reply == QMessageBox.Yes
