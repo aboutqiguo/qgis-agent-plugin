@@ -7,15 +7,18 @@
 
 ## 📈 更新日志 (Changelog)
 
-### v1.1.0 (重磅架构更新)
-本次 `v1.1.0` 是一次架构级的重大跨越！我们在**底层线程安全、外部生态连接（GEE/OSM）、智能体核心认知策略**以及**跨平台 UI 兼容性**四个维度进行了深度的重构与打磨。
-- **底层线程安全**：新增 AST 防卡死注入器 (`LoopInjector`)，执行高负载计算时静默注入 `processEvents()`，确保 QGIS 主界面永不假死。
-- **认知重构**：强迫 Agent 优先调用 QGIS 原生 `Processing Toolbox` 算法库，告别盲目手造“低效轮子”。
-- **数据桥接器强化**：GEE 下载重构规避端口拦截；OSM 引入 `QNetworkAccessManager` 异步下载引擎。
-- **医学级栅格裁切引擎**：重构 `clip_raster`，严格保留原始数据的波段数及张量维度，彻底废弃破坏性 `NoData` 掩膜方式。
-- **原生 UI 与跨平台适配**：
-  - 完美适配 QGIS 原生深浅色主题（`palette` 色板自适应），消除僵硬的白色面板。
-  - 重构打包脚本，根除 Windows 平台下 ZIP 压缩包引起 macOS / Linux 用户安装失败的历史 Bug。
+### v1.1.0 (架构与兼容性更新)
+本次 `v1.1.0` 在底层线程安全、外部数据桥接（GEE/OSM）、分析策略及跨平台 UI 兼容性方面进行了重构与优化。
+- **线程安全**：新增 AST 注入器 (`LoopInjector`)，在耗时循环中自动注入 `processEvents()`，以防 QGIS 界面卡死。
+- **任务策略**：调整系统提示词逻辑，要求 Agent 优先使用 QGIS `Processing Toolbox` 中的原生算法（如 GRASS、SAGA）处理空间分析任务。
+- **数据桥接器**：重构 GEE 模块的数据请求机制以规避端口异常；OSM 下载模块引入 `QNetworkAccessManager` 实现异步获取。
+- **栅格裁切**：重构 `clip_raster` 工具，修正了先前版本中使用 Alpha 波段及 NoData 掩膜导致的光谱波段数与张量维度改变的问题。
+- **UI 与跨平台适配**：
+  - 移除了 UI 面板中的固定背景色，使用 `palette(base)` 适配 QGIS 的原生深浅色主题。
+  - 修正了打包脚本（`build.py`）中的路径分隔符，解决 Windows 打包的 ZIP 导致 macOS / Linux 下安装失败的问题。
+
+### 🤝 致谢 (Acknowledgments)
+本插件在开发过程中，部分底层代码逻辑与工程设计参考了开源项目 [GeoCode](https://github.com/chenyusheng2001/GeoCode) (GeoCode-Release)。特此向 GeoCode 团队的开源贡献表示感谢！
 
 ---
 
