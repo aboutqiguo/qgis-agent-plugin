@@ -1,0 +1,36 @@
+qgis_agent_plugin/
+├── __init__.py               # 插件入口点 (QGIS 硬性要求)
+├── metadata.txt              # 插件元数据 (QGIS 硬性要求)
+├── agent_plugin.py           # 插件主类 (注册界面和核心引擎的桥梁)
+│
+├── core/                     # 核心引擎层 (大模型交互、线程管理、记忆处理)
+│   ├── __init__.py
+│   ├── harness_thread.py     # 大模型思考与执行后台线程
+│   ├── sqlite_memory.py      # SQLite 记忆库及 Auto-RAG 引擎
+│   └── logger.py             # 日志系统
+│
+├── ui/                       # 用户界面层 (所有的可视化组件)
+│   ├── __init__.py
+│   ├── chat_dockwidget.py    # 主对话停靠窗口
+│   └── settings_dialog.py    # 配置页面
+│
+├── bridges/                  # 第三方生态桥接层 (网络服务通信)
+│   ├── __init__.py
+│   ├── gee_bridge.py         # Google Earth Engine 认证与请求
+│   └── osm_bridge.py         # OpenStreetMap 工具
+│
+├── tools/                    # Agent 刀具库 (原子工具集)
+│   ├── __init__.py
+│   ├── tools.py              # 工具注册中心 (Tool Registry)
+│   └── qgis_tools/           # (现有目录) QGIS 原生空间算法与操作工具
+│       ├── geoprocessing_tools.py
+│       ├── gui_tools.py
+│       ├── io_tools.py
+│       └── mapping_tools.py
+│
+├── utils/                    # 通用工具层
+│   ├── __init__.py
+│   └── update_checker.py     # GitHub 热更新检查与下载逻辑
+│
+└── prompts/                  # 提示词库
+    └── system_prompt.md      # 系统核心 Prompt

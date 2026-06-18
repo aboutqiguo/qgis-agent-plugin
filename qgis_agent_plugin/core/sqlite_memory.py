@@ -35,17 +35,25 @@ class SqliteMemoryDB:
                 )
             ''')
             
-            cursor.execute('''
-                CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                    role, content, content='messages', content_rowid='id'
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                  INSERT INTO messages_fts(rowid, role, content) VALUES (new.id, new.role, new.content);
-                END;
-            ''')
+            self.has_fts = False
+            try:
+                cursor.execute('''
+                    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                        role, content, content='messages', content_rowid='id'
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                      INSERT INTO messages_fts(rowid, role, content) VALUES (new.id, new.role, new.content);
+                    END;
+                ''')
+                self.has_fts = True
+            except Exception as e:
+                import logging
+                logging.warning(f"SQLite FTS5 is not available: {e}. Falling back to standard LIKE queries.")
+                self.has_fts = False
+                
             self.conn.commit()
         return True
         
@@ -55,7 +63,11 @@ class SqliteMemoryDB:
             
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM messages")
-        cursor.execute("DELETE FROM messages_fts")
+        if getattr(self, 'has_fts', False):
+            try:
+                cursor.execute("DELETE FROM messages_fts")
+            except Exception:
+                pass
         
         for msg in messages_list:
             role = msg.get("role", "")
@@ -115,15 +127,27 @@ class SqliteMemoryDB:
             return "Error: QGIS Project is not saved."
             
         cursor = self.conn.cursor()
-        # Sanitize query for FTS MATCH
+        # Sanitize query for SQL
         sanitized_query = query.replace('"', '""')
         try:
-            cursor.execute('''
-                SELECT role, content FROM messages_fts 
-                WHERE messages_fts MATCH ? 
-                ORDER BY rank LIMIT ?
-            ''', (f'"{sanitized_query}"', limit))
+            if getattr(self, 'has_fts', False):
+                cursor.execute('''
+                    SELECT role, content FROM messages_fts 
+                    WHERE messages_fts MATCH ? 
+                    ORDER BY rank LIMIT ?
+                ''', (f'"{sanitized_query}"', limit))
+            else:
+                cursor.execute('''
+                    SELECT role, content FROM messages 
+                    WHERE content LIKE ? 
+                    ORDER BY id DESC LIMIT ?
+                ''', (f'%{query}%', limit))
+                
             results = cursor.fetchall()
+            if not getattr(self, 'has_fts', False):
+                # Reverse back to chronological order
+                results = list(reversed(results))
+                
             if not results:
                 return "No past conversations found matching the query."
                 

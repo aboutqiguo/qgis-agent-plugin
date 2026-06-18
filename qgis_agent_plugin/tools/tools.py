@@ -305,6 +305,61 @@ ATOMIC_TOOLS_SCHEMA = [
             "destructive": False,
             "requires_confirmation": False
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_skill",
+            "description": "Read the full contents of a skill card. Use this to understand specific business rules or API quirks before writing code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "The exact name of the skill (e.g. 'gee_execution')."
+                    }
+                },
+                "required": ["skill_name"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_or_update_dynamic_skill",
+            "description": "Save a new dynamic skill or update an existing one. Use this ONLY after you have successfully fixed a complex bug or learned a new user preference.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "The name of the skill (e.g. 'default_symbology')."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "A short summary of what this skill is about (Required if action is 'create')."
+                    },
+                    "rules": {
+                        "type": "string",
+                        "description": "The precise rules, gotchas, or code templates to remember."
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "update"],
+                        "description": "Whether to create a new skill or update/append to an existing one."
+                    }
+                },
+                "required": ["skill_name", "rules", "action"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False
+        }
     }
 ]
 
@@ -320,7 +375,7 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                 algorithms = ee.apifunction.ApiFunction.algorithms()
             except Exception:
                 try:
-                    from .gee_bridge import init_gee
+                    from ..bridges.gee_bridge import init_gee
                     init_gee()
                     algorithms = ee.apifunction.ApiFunction.algorithms()
                 except Exception as e:
@@ -624,6 +679,62 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                     return f"Downloaded OSM data but QGIS failed to load it as a vector layer."
             except Exception as e:
                 return f"Error downloading OSM data: {str(e)}"
+
+        elif tool_name == "read_skill":
+            import os
+            skill_name = kwargs.get("skill_name")
+            if not skill_name:
+                return "Error: skill_name is required."
+            
+            # Search in core and dynamic directories
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            core_path = os.path.join(base_dir, "skills", "core", f"{skill_name}.md")
+            dynamic_path = os.path.join(base_dir, "skills", "dynamic", f"{skill_name}.md")
+            
+            if os.path.exists(core_path):
+                with open(core_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            elif os.path.exists(dynamic_path):
+                with open(dynamic_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            else:
+                return f"Error: Skill '{skill_name}' not found."
+
+        elif tool_name == "save_or_update_dynamic_skill":
+            import os
+            skill_name = kwargs.get("skill_name")
+            desc = kwargs.get("description", "")
+            rules = kwargs.get("rules")
+            action = kwargs.get("action")
+            
+            if not skill_name or not rules or not action:
+                return "Error: skill_name, rules, and action are required."
+                
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            dynamic_dir = os.path.join(base_dir, "skills", "dynamic")
+            os.makedirs(dynamic_dir, exist_ok=True)
+            
+            file_path = os.path.join(dynamic_dir, f"{skill_name}.md")
+            
+            if action == "create":
+                if os.path.exists(file_path):
+                    return f"Error: Skill '{skill_name}' already exists. Use action='update' instead."
+                content = f"<skill>\n<name>{skill_name}</name>\n<description>{desc}</description>\n\n<strict_rules>\n{rules}\n</strict_rules>\n</skill>"
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                return f"Successfully created dynamic skill '{skill_name}'."
+                
+            elif action == "update":
+                if not os.path.exists(file_path):
+                    # Check if it's trying to update a core skill
+                    core_path = os.path.join(base_dir, "skills", "core", f"{skill_name}.md")
+                    if os.path.exists(core_path):
+                        return f"Error: '{skill_name}' is a core skill and cannot be modified directly. You should create a new dynamic skill to override it."
+                    return f"Error: Dynamic skill '{skill_name}' does not exist to update."
+                
+                with open(file_path, 'a', encoding='utf-8') as f:
+                    f.write(f"\n\n<!-- UPDATE -->\n<strict_rules>\n{rules}\n</strict_rules>")
+                return f"Successfully updated dynamic skill '{skill_name}'."
 
         else:
             return f"Unknown tool: {tool_name}"

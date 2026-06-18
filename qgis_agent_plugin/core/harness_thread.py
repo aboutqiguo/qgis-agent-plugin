@@ -10,7 +10,7 @@ class HarnessThread(QThread):
     finished_signal = pyqtSignal()
     
     request_human_input_signal = pyqtSignal(str)
-    request_destructive_auth_signal = pyqtSignal()
+    request_destructive_auth_signal = pyqtSignal(str)
     request_plan_approval_signal = pyqtSignal()
     
     request_code_execution_signal = pyqtSignal(str)
@@ -21,7 +21,7 @@ class HarnessThread(QThread):
         super().__init__(parent)
         self.plugin_dir = plugin_dir
         
-        from .logger import get_logger
+        from ..utils.logger import get_logger
         self.logger = get_logger()
         self.logger.info("HarnessThread initialized.")
         
@@ -82,11 +82,13 @@ class HarnessThread(QThread):
                 "type": "function",
                 "function": {
                     "name": "submit_plan_for_approval",
-                    "description": "Submit a proposed plan for human approval. Use this in PLAN mode after you output your detailed plan text.",
+                    "description": "Submit a proposed plan for human approval. You MUST pass your detailed plan text and checklist into the 'plan_markdown' argument.",
                     "parameters": {
                         "type": "object",
-                        "properties": {},
-                        "required": []
+                        "properties": {
+                            "plan_markdown": {"type": "string", "description": "The full markdown content of your plan and checklist. Use [ ], [/], [x]."}
+                        },
+                        "required": ["plan_markdown"]
                     }
                 }
             },
@@ -126,7 +128,7 @@ class HarnessThread(QThread):
             }
         ]
         
-        from .tools import ATOMIC_TOOLS_SCHEMA
+        from ..tools.tools import ATOMIC_TOOLS_SCHEMA
         self.tools.extend(ATOMIC_TOOLS_SCHEMA)
         
         self.tools.append({
@@ -272,30 +274,50 @@ class HarnessThread(QThread):
                     base_prompt += f"-- MEMORY.md (Project Facts & Quirks, Absolute Path: `{memory_md_path}`) --\n{f.read()}\n\n"
             else:
                 base_prompt += f"-- MEMORY.md --\n(No project facts recorded yet. You can create this file using `write_file` at its absolute path: `{memory_md_path}`)\n\n"
-        else:
-             base_prompt += "(QGIS Project is not saved. MEMORY.md cannot be injected. Please ask the user to save the project first.)\n\n"
-                
-        base_prompt += """
-- You MUST write complete, executable Python code.
-- Always use `iface.messageBar().pushMessage()` to show progress to the human visually.
-- IMPORTANT: Whenever you load, create, or process a new layer (vector or raster), you MUST add it to the QGIS project (`QgsProject.instance().addMapLayer(layer)`) or use `iface.addVectorLayer()` / `iface.addRasterLayer()` so the user can see the result on their screen! Do not just save files to disk silently.
-"""
         import os
-        prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "system_prompt.md")
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        
+        # 1. Scan and build skill manifest
+        skill_manifest = "可用技能目录:\n"
+        skills_core_dir = os.path.join(base_dir, "skills", "core")
+        skills_dyn_dir = os.path.join(base_dir, "skills", "dynamic")
+        
+        for d in [skills_core_dir, skills_dyn_dir]:
+            if os.path.exists(d):
+                for f_name in os.listdir(d):
+                    if f_name.endswith('.md'):
+                        try:
+                            with open(os.path.join(d, f_name), 'r', encoding='utf-8') as sf:
+                                content = sf.read()
+                                import re
+                                name_match = re.search(r'<name>(.*?)</name>', content, re.DOTALL)
+                                desc_match = re.search(r'<description>(.*?)</description>', content, re.DOTALL)
+                                if name_match and desc_match:
+                                    skill_manifest += f"- `{name_match.group(1).strip()}`: {desc_match.group(1).strip()}\n"
+                        except Exception:
+                            pass
+        
+        # 2. Load core system prompt
+        prompt_path = os.path.join(base_dir, "prompts", "system_prompt.md")
         cheat_sheet = ""
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
-                cheat_sheet = f.read()
+                cheat_sheet = f.read().replace("{skill_directory}", skill_manifest)
                 
         base_prompt += "\n" + cheat_sheet + "\n"
         if self.work_mode == "PLAN":
             base_prompt += """
 ### ⚠️ CRITICAL WORKFLOW (PLAN MODE & ARTIFACT TRACKING)
-1. **PLAN FIRST**: Do NOT call `execute_pyqgis_script` to solve the problem immediately! First, you MUST create an `implementation_plan.md` artifact in the QGIS project root using the `write_file` tool. Detail the background context, proposed changes, and a markdown checklist of steps.
-2. **SUBMIT PLAN**: You MUST call `submit_plan_for_approval` IMMEDIATELY after writing your plan to pause execution and wait for human review. DO NOT proceed without calling this tool!
-3. **TASK ARTIFACT**: Once the user approves the plan, use `write_file` to create a `task.md` file containing your execution checklist. Use `[ ]` for pending, `[/]` for in-progress, and `[x]` for completed tasks.
-4. **EXECUTE & VERIFY (ReAct)**: Execute ONE step at a time using `execute_pyqgis_script`. After completing each step, you MUST use `replace_file_content` to update `task.md` (e.g., change `[ ] Step 1` to `[x] Step 1`).
-5. **WALKTHROUGH**: After all steps are completed, create a `walkthrough.md` summarizing what you accomplished.
+1. **PLAN FIRST**: Do NOT call `execute_pyqgis_script` to solve the problem immediately! First, you MUST formulate a detailed plan and a markdown checklist of steps. 
+   - ⚠️ FORMAT: Your markdown checklist MUST strictly follow this format, using proper bullet points (`- `) and a main header:
+     # 任务执行进度
+     
+     - [ ] 步骤1：...
+     - [ ] 步骤2：...
+   - ⚠️ CRITICAL: Your initially proposed plan MUST have ALL steps marked as pending `[ ]`. Do NOT mark any step as completed `[x]` before you have actually executed the code for it!
+2. **SUBMIT PLAN**: You MUST call `submit_plan_for_approval` and pass your full markdown plan into the 'plan_markdown' argument. This will automatically save it to `task.md` and pause execution for human review. DO NOT proceed without calling this tool!
+3. **EXECUTE & VERIFY (ReAct)**: Once the user approves, execute ONE step at a time using `execute_pyqgis_script`. To save tokens, you don't need to update `task.md` after every single minor tool call. However, you MUST use `replace_file_content` to update the checkboxes (e.g., `[x]`) in `task.md` before you finish your turn (when you are about to stop calling tools and reply to the user).
+4. **WALKTHROUGH**: After all steps are completed, create a `walkthrough.md` summarizing what you accomplished.
 """
         else:
             base_prompt += """
@@ -480,6 +502,21 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                 self.user_input = self.user_input.replace(img_match.group(0), f"\n\n[Exception analyzing image: {str(e)}]")
             
         self._prepare_messages()
+        
+        # Self-repair: Fix hanging tool_calls from previously interrupted sessions
+        # If the user kills the thread during tool execution, the assistant's tool_calls message
+        # is saved to memory, but the corresponding 'tool' response is never appended.
+        # This causes OpenAI to throw a 400 BadRequest on the next turn.
+        if self.messages and self.messages[-1].get("role") == "assistant" and self.messages[-1].get("tool_calls"):
+            self.logger.warning("Detected hanging tool_calls from an interrupted session. Injecting repair messages...")
+            for tc in self.messages[-1]["tool_calls"]:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, 'id', '')
+                if tc_id:
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": "Error: Tool execution was cancelled by the user in the previous session."
+                    })
         
         # Process Auto-Reflection Trigger
         completion_keywords = ["完成", "结束", "好了", "done", "finish"]
@@ -1012,6 +1049,30 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                         })
 
                     elif name == "submit_plan_for_approval":
+                        plan_markdown = args.get("plan_markdown", "")
+                        if not plan_markdown:
+                            self.logger.warning("Agent attempted to submit plan without providing plan_markdown")
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "name": name,
+                                "content": "Error: You MUST provide your full markdown checklist in the 'plan_markdown' argument."
+                            })
+                            continue
+                            
+                        from qgis.core import QgsProject
+                        import os
+                        home = QgsProject.instance().homePath()
+                        if home:
+                            task_path = os.path.join(home, "task.md")
+                            try:
+                                with open(task_path, "w", encoding="utf-8") as f:
+                                    f.write(plan_markdown)
+                                self.logger.info(f"Automatically wrote plan_markdown to {task_path}")
+                                self.append_message_signal.emit("SYSTEM", "📝 **[Artifact Created: task.md]**\n\n(系统已根据您的计划自动生成任务文件)")
+                            except Exception as e:
+                                self.logger.error(f"Failed to write task.md: {e}")
+                            
                         self.logger.info("Agent requesting plan approval.")
                         self.plan_approval_event.clear()
                         self.request_plan_approval_signal.emit()
@@ -1072,7 +1133,7 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                         if is_destructive:
                             self.logger.warning("Agent requested destructive auth.")
                             self.destructive_auth_event.clear()
-                            self.request_destructive_auth_signal.emit()
+                            self.request_destructive_auth_signal.emit(code)
                             self.destructive_auth_event.wait()
                             
                             if not self.destructive_auth_response:
@@ -1142,7 +1203,7 @@ You are in auto-execute mode. You DO NOT need to submit plans for approval. You 
                         })
                     else:
                         # Fallback to atomic tools
-                        from .tools import execute_atomic_tool
+                        from ..tools.tools import execute_atomic_tool
                         self.logger.debug(f"Delegating tool execution to atomic tools: {name}")
                         try:
                             from qgis.utils import iface

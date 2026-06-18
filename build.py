@@ -5,7 +5,7 @@ import shutil
 def build_plugin():
     # 配置选项
     plugin_dir = "qgis_agent_plugin"
-    output_zip = "qgis_agent_plugin_v1.0.1.zip"
+    output_zip = "qgis_agent_plugin_v1.1.0.zip"
     
     # 需要严格排除的文件和文件夹
     exclude_dirs = {'__pycache__', '.git', 'test_data', 'tests', 'temp_images'}
@@ -30,9 +30,9 @@ def build_plugin():
                 if any(file.endswith(ext) for ext in exclude_exts):
                     continue
                 
-                # 计算文件在压缩包内的相对路径
+                # 计算文件在压缩包内的相对路径并强制转换为正斜杠（解决 Mac QGIS 解压失败报错找不到根目录的 Bug）
                 file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, os.path.dirname(plugin_dir))
+                arcname = os.path.relpath(file_path, os.path.dirname(plugin_dir)).replace('\\', '/')
                 
                 # 写入压缩包
                 zipf.write(file_path, arcname)

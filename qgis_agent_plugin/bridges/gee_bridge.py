@@ -283,13 +283,21 @@ class GEEWaitTask(QgsTask):
     def run(self):
         import ee
         import time
-        task = ee.batch.Task(self.task_id, 'UNKNOWN', 'UNKNOWN', 'UNKNOWN')
         start_time = time.time()
         while True:
             if self.isCanceled():
                 return False
                 
-            status = task.status()
+            try:
+                status_list = ee.data.getTaskStatus(self.task_id)
+                if not status_list:
+                    self.exception = Exception(f"Task ID {self.task_id} not found.")
+                    return False
+                status = status_list[0]
+            except Exception as e:
+                self.exception = Exception(f"Failed to get task status: {e}")
+                return False
+                
             state = status.get('state')
             if state == 'COMPLETED':
                 return True
@@ -472,21 +480,21 @@ class GEEDownloader:
         import ee
         import requests
         import os
+        from qgis.core import QgsSettings
         
         # 1. Wait for task to complete
         wait_task = GEEWaitTask(f"Waiting for GEE Cloud: {filename}", task_id, timeout)
         GEEDownloader.run_qgs_task_sync(wait_task)
-        iface.messageBar().pushMessage("GEE", "GEE Task completed! Fetching via Google Drive API...", level=Qgis.MessageLevel.Success)
+        iface.messageBar().pushMessage("GEE", "GEE Task completed! Querying Google Drive API...", level=Qgis.MessageLevel.Success)
             
         # 2. Authenticate against Drive API
         credentials = ee.data.get_persistent_credentials()
         headers = {}
         credentials.apply(headers)
         
-        # 3. Search for the file in Drive
+        # 3. Search for the file in Drive and get size
         search_url = "https://www.googleapis.com/drive/v3/files"
-        # Since 'name contains' might be broad, we search broadly and filter locally.
-        params = {'q': f"name contains '{filename}' and trashed=false", 'fields': 'files(id, name)'}
+        params = {'q': f"name contains '{filename}' and trashed=false", 'fields': 'files(id, name, size)', 'pageSize': 1000}
         res = requests.get(search_url, params=params, headers=headers)
         res.raise_for_status()
         files = res.json().get('files', [])
@@ -496,6 +504,23 @@ class GEEDownloader:
         if not target_files:
             raise Exception(f"File(s) for {filename} not found in Google Drive!")
             
+        total_size_bytes = sum(int(f.get('size', 0)) for f in target_files)
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        
+        iface.messageBar().pushMessage("GEE", f"File size on Drive: {total_size_mb:.1f} MB", level=Qgis.MessageLevel.Info)
+        
+        # Smart Routing Tier Logic
+        if total_size_mb > 500:
+            iface.messageBar().pushMessage("GEE", f"Data >500MB ({total_size_mb:.1f}MB). Falling back to Local Client Sync...", level=Qgis.MessageLevel.Warning)
+            settings = QgsSettings()
+            sync_path = settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘")
+            
+            if not os.path.exists(sync_path):
+                iface.messageBar().pushMessage("CRITICAL", f"Local drive path '{sync_path}' not found! Please manually download from Google Drive web.", level=Qgis.MessageLevel.Critical, duration=20)
+            
+            return GEEDownloader.wait_for_drive_sync(task_id, folder_name, filename, dest_dir, drive_root=sync_path, timeout=timeout)
+            
+        # Else: <= 500MB, download via API
         os.makedirs(dest_dir, exist_ok=True)
         downloaded_paths = []
         
@@ -535,64 +560,68 @@ class GEEDownloader:
                 return downloaded_paths[0]
 
     @staticmethod
-    def download_ee_object(ee_object, filename, dest_dir, scale=30, region=None, crs='EPSG:4326'):
-        from qgis.core import QgsSettings
-        settings = QgsSettings()
-        strategy = settings.value("qgis_agent/gee_download_strategy", "smart")
+    def download_ee_object(ee_object, filename, dest_dir, scale=30, region=None, crs='EPSG:4326', exact_geom=None):
+        import re
+        import time
         
         if isinstance(ee_object, ee.FeatureCollection):
             raise NotImplementedError("Vector download wrapper not yet implemented, please use ee.batch.Export.table.")
             
-        if strategy == "smart":
-            # Attempt direct download first
+        iface.messageBar().pushMessage("GEE", "Initiating Smart Routing: Exporting to Google Drive...", level=Qgis.MessageLevel.Info)
+        
+        # --- Strict Coverage Detection ---
+        if exact_geom is not None:
+            iface.messageBar().pushMessage("GEE", "Calculating spatial coverage against exact geometry...", level=Qgis.MessageLevel.Info)
             try:
-                iface.messageBar().pushMessage("GEE", "Attempting direct download (Smart Routing)...", level=Qgis.MessageLevel.Info)
-                params = {'scale': scale, 'crs': crs, 'format': 'GEO_TIFF'}
-                if region:
-                    params['region'] = region
-                    
-                url = ee_object.getDownloadURL(params)
-                dest_path = os.path.join(dest_dir, f"{filename}.tif")
+                # Get the mask of the first band (1 if valid, 0 if NoData)
+                mask_img = ee_object.select(0).mask()
                 
-                dl_task = GEEDownloadTask(f"Direct downloading {filename}", url, dest_path)
-                GEEDownloader.run_qgs_task_sync(dl_task)
+                # Calculate total area of the exact geometry
+                geom_area = exact_geom.area(maxError=1).getInfo()
                 
-                iface.messageBar().pushMessage("GEE", "Direct download successful!", level=Qgis.MessageLevel.Success)
-                return dest_path
-            except Exception as e:
-                err_str = str(e).lower()
-                if "too large" in err_str or "exceeds" in err_str or "request payload size exceeds" in err_str:
-                    iface.messageBar().pushMessage("GEE", "Image too large for direct download. Falling back to Drive API...", level=Qgis.MessageLevel.Warning)
-                else:
-                    iface.messageBar().pushMessage("GEE", f"Direct download failed: {str(e)}. Falling back to Drive API...", level=Qgis.MessageLevel.Warning)
-                    
-                # Fallback to Export + Drive API
-                task = ee.batch.Export.image.toDrive(
-                    image=ee_object,
-                    description=filename,
-                    folder='QGIS_Agent_Exports',
-                    fileNamePrefix=filename,
+                # Calculate the area of valid pixels within the exact geometry
+                valid_area_img = mask_img.multiply(ee.Image.pixelArea())
+                stats = valid_area_img.reduceRegion(
+                    reducer=ee.Reducer.sum(),
+                    geometry=exact_geom,
                     scale=scale,
-                    crs=crs,
-                    region=region,
-                    maxPixels=1e13
+                    maxPixels=1e10
                 )
-                task.start()
-                return GEEDownloader._download_via_drive_api(task.id, 'QGIS_Agent_Exports', filename, dest_dir)
                 
-        else:
-            # Traditional Client Sync
-            sync_path = settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘")
-            task = ee.batch.Export.image.toDrive(
-                image=ee_object,
-                description=filename,
-                folder='QGIS_Agent_Exports',
-                fileNamePrefix=filename,
-                scale=scale,
-                crs=crs,
-                region=region,
-                maxPixels=1e13
-            )
-            task.start()
-            return GEEDownloader.wait_for_drive_sync(task.id, 'QGIS_Agent_Exports', filename, dest_dir, drive_root=sync_path)
-
+                stats_dict = stats.getInfo()
+                if stats_dict:
+                    valid_area = list(stats_dict.values())[0]
+                    coverage_ratio = valid_area / geom_area if geom_area > 0 else 0
+                    
+                    logger.info(f"GEE Coverage Check: {coverage_ratio*100:.2f}% (Valid Area: {valid_area}, Total Area: {geom_area})")
+                    
+                    if coverage_ratio < 0.99:
+                        error_msg = f"Download aborted: Image only covers {coverage_ratio*100:.2f}% of the target geometry. Please use mosaic or select a different image."
+                        iface.messageBar().pushMessage("GEE Error", error_msg, level=Qgis.MessageLevel.Critical, duration=10)
+                        raise Exception(error_msg)
+            except Exception as e:
+                if "Download aborted" in str(e):
+                    raise
+                else:
+                    logger.warning(f"Failed to calculate coverage, skipping check: {e}")
+        # ---------------------------------
+        
+        # GEE task description only allows specific alphanumeric characters and max 100 length.
+        safe_desc = re.sub(r'[^a-zA-Z0-9.\-:_]', '_', filename)
+        if not safe_desc.replace('_', ''):
+            safe_desc = f"export_{int(time.time())}"
+        safe_desc = safe_desc[:100]
+        
+        task = ee.batch.Export.image.toDrive(
+            image=ee_object,
+            description=safe_desc,
+            folder='QGIS_Agent_Exports',
+            fileNamePrefix=filename,
+            scale=scale,
+            crs=crs,
+            region=region,
+            maxPixels=1e13
+        )
+        task.start()
+        
+        return GEEDownloader._download_via_drive_api(task.id, 'QGIS_Agent_Exports', filename, dest_dir)

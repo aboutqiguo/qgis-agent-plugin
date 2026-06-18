@@ -25,9 +25,9 @@ class SettingsDialog(QDialog):
         self.nav_list.addItem("🧬 记忆与性格")
         self.nav_list.addItem("🔄 检查更新")
         self.nav_list.setStyleSheet("""
-            QListWidget { border: 1px solid #ced4da; border-radius: 4px; background: white; font-size: 13px; }
-            QListWidget::item { padding: 10px; border-bottom: 1px solid #f8f9fa; }
-            QListWidget::item:selected { background-color: #e7f1ff; color: #0d6efd; font-weight: bold; }
+            QListWidget { border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; }
+            QListWidget::item { padding: 10px; }
+            QListWidget::item:selected { font-weight: bold; }
         """)
         self.nav_list.currentRowChanged.connect(self.change_page)
         
@@ -67,11 +67,11 @@ class SettingsDialog(QDialog):
         layout.setSpacing(4)
         label = QLabel(f"<b>{label_text} <span style='color:red;'>*</span></b>")
         layout.addWidget(label)
-        widget.setStyleSheet("padding: 8px; border: 1px solid #ced4da; border-radius: 4px; background: white;")
+        widget.setStyleSheet("padding: 8px; border-radius: 4px;")
         layout.addWidget(widget)
         if hint_text:
             hint = QLabel(hint_text)
-            hint.setStyleSheet("color: #6c757d; font-size: 11px;")
+            hint.setStyleSheet("font-size: 11px;")
             layout.addWidget(hint)
         layout.addSpacing(15)
         return layout
@@ -180,29 +180,16 @@ class SettingsDialog(QDialog):
         dl_layout = QVBoxLayout()
         download_group.setLayout(dl_layout)
         
-        dl_layout.addWidget(QLabel("当 Agent 调用 GEE 下载大范围栅格时，采用哪种方案？"))
+        dl_layout.addWidget(QLabel("智能路由：下载 GEE 超大范围数据 (>500MB) 时，Agent 将回退到本地客户端同步方案。"))
         
-        self.dl_strategy_combo = QComboBox()
-        self.dl_strategy_combo.addItem("智能直连路由 (推荐，免挂载盘)", "smart")
-        self.dl_strategy_combo.addItem("Google Drive 客户端同步 (传统)", "client_sync")
-        self.dl_strategy_combo.setStyleSheet("font-weight: normal; padding: 4px;")
-        dl_layout.addWidget(self.dl_strategy_combo)
-        
-        self.dl_path_label = QLabel("本地挂载路径 (Drive Path):")
+        self.dl_path_label = QLabel("Google Drive 本地挂载路径 (Drive Path):")
         self.dl_path_label.setStyleSheet("font-weight: normal; margin-top: 10px;")
         dl_layout.addWidget(self.dl_path_label)
         
         self.dl_path_input = QLineEdit()
         self.dl_path_input.setStyleSheet("font-weight: normal;")
         dl_layout.addWidget(self.dl_path_input)
-        
-        def on_strategy_changed():
-            is_client = self.dl_strategy_combo.currentData() == "client_sync"
-            self.dl_path_label.setVisible(is_client)
-            self.dl_path_input.setVisible(is_client)
-            
-        self.dl_strategy_combo.currentIndexChanged.connect(on_strategy_changed)
-        
+
         layout.addWidget(download_group)
         layout.addStretch()
         
@@ -252,7 +239,7 @@ class SettingsDialog(QDialog):
         title = QLabel("<h2>🔄 检查更新 (Updates)</h2>")
         layout.addWidget(title)
         
-        from .update_checker import UpdateChecker
+        from ..utils.update_checker import UpdateChecker
         desc = QLabel(f"当前版本: <b>{UpdateChecker.get_local_version()}</b><br><br>在线热更新机制预留，您可以在此检查 GitHub 上的新版本发布。")
         desc.setStyleSheet("color: #6c757d; font-size: 13px;")
         layout.addWidget(desc)
@@ -272,7 +259,7 @@ class SettingsDialog(QDialog):
 
     def check_for_updates(self):
         from qgis.PyQt.QtCore import QCoreApplication
-        from .update_checker import UpdateChecker
+        from ..utils.update_checker import UpdateChecker
         
         self.check_update_btn.setText("正在连接 GitHub... (Checking...)")
         self.check_update_btn.setEnabled(False)
@@ -329,18 +316,12 @@ class SettingsDialog(QDialog):
         else:
             self.gee_status_label.setText("当前绑定的 Project ID: <b style='color:red;'>未配置</b>")
             
-        dl_strategy = self.settings.value("qgis_agent/gee_download_strategy", "smart")
-        index = self.dl_strategy_combo.findData(dl_strategy)
-        if index >= 0:
-            self.dl_strategy_combo.setCurrentIndex(index)
-            
-        # call the local function defined in build_gee_page? Wait, the function was defined locally inside build_gee_page!
-        # I can just trigger it by simulating index change, or just checking the value.
-        is_client = dl_strategy == "client_sync"
-        self.dl_path_label.setVisible(is_client)
-        self.dl_path_input.setVisible(is_client)
-            
-        self.dl_path_input.setText(self.settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘"))
+        # We only have drive sync path now
+        self.dl_path_label.setVisible(True)
+        self.dl_path_input.setVisible(True)
+        
+        sync_path = self.settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘")
+        self.dl_path_input.setText(sync_path)
 
         self.personality_input.setPlainText(self.settings.value("qgis_agent/agent_personality", ""))
         import os
@@ -396,7 +377,7 @@ class SettingsDialog(QDialog):
             except Exception:
                 pass
         
-        self.settings.setValue("qgis_agent/gee_download_strategy", self.dl_strategy_combo.currentData())
+        self.settings.remove("qgis_agent/gee_download_strategy")
         self.settings.setValue("qgis_agent/gee_drive_sync_path", self.dl_path_input.text().strip())
         self.settings.setValue("qgis_agent/auto_check_update", self.auto_update_cb.isChecked())
         
@@ -404,7 +385,7 @@ class SettingsDialog(QDialog):
         self.accept()
         
     def reauthenticate_gee(self):
-        from .gee_bridge import GEEAuth
+        from ..bridges.gee_bridge import GEEAuth
         from qgis.PyQt.QtWidgets import QMessageBox
         try:
             if GEEAuth.authenticate_and_initialize(force=True):
@@ -414,7 +395,7 @@ class SettingsDialog(QDialog):
             QMessageBox.critical(self, "GEE 错误", str(e))
             
     def clear_gee_auth(self):
-        from .gee_bridge import clear_gee_auth as bridge_clear
+        from ..bridges.gee_bridge import clear_gee_auth as bridge_clear
         try:
             bridge_clear()
             self.gee_status_label.setText("当前绑定的 Project ID: <b style='color:red;'>未配置 (已清除)</b>")
