@@ -7,7 +7,7 @@ class UpdateChecker:
     
     @staticmethod
     def get_local_version():
-        metadata_path = os.path.join(os.path.dirname(__file__), 'metadata.txt')
+        metadata_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'metadata.txt')
         if not os.path.exists(metadata_path):
             return "0.0.0"
         with open(metadata_path, 'r', encoding='utf-8') as f:
