@@ -1,5 +1,6 @@
-from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QTextBrowser, QLineEdit, QPushButton, QHBoxLayout, QMessageBox, QInputDialog, QComboBox, QTextEdit, QLabel, QGridLayout, QSizePolicy, QMenu, QAction
+from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout, QMessageBox, QInputDialog, QTextEdit, QLabel, QSizePolicy, QMenu, QAction, QApplication
 from qgis.PyQt.QtCore import pyqtSignal, Qt, QPoint
+from qgis.PyQt.QtGui import QPalette
 
 class AutoExpandingTextEdit(QTextEdit):
     returnPressed = pyqtSignal()
@@ -130,7 +131,7 @@ class ChatDockWidget(QDockWidget):
         
         self.setStyleSheet("""
             QWidget { font-family: 'Segoe UI', Arial, sans-serif; }
-            QTextBrowser { border: 1px solid #ced4da; border-radius: 8px; padding: 12px; font-size: 13px; }
+            QTextBrowser { color: palette(text); background-color: palette(base); border: 1px solid palette(mid); border-radius: 8px; padding: 12px; font-size: 13px; }
             QComboBox { border: none; background: transparent; font-weight: bold; font-size: 12px; padding: 2px 4px; }
             QComboBox::drop-down { border: none; }
         """)
@@ -186,7 +187,7 @@ class ChatDockWidget(QDockWidget):
         self.tab_chat_btn = QPushButton("💬 对话")
         self.tab_task_btn = QPushButton("✔️ 任务")
         
-        self.tab_style_inactive = "QPushButton { background: transparent; color: #6c757d; font-size: 14px; font-weight: bold; border: none; padding-bottom: 4px; } QPushButton:hover { color: #212529; }"
+        self.tab_style_inactive = "QPushButton { background: transparent; color: palette(mid); font-size: 14px; font-weight: bold; border: none; padding-bottom: 4px; } QPushButton:hover { color: palette(window-text); }"
         self.tab_style_active = "QPushButton { background: transparent; color: #0d6efd; font-size: 14px; font-weight: bold; border: none; border-bottom: 2px solid #0d6efd; padding-bottom: 4px; }"
         
         for btn in [self.tab_chat_btn, self.tab_task_btn]:
@@ -199,10 +200,27 @@ class ChatDockWidget(QDockWidget):
         
         self.top_bar_layout.addStretch()
         
-        self.settings_btn = QPushButton("⚙️")
+        self.settings_btn = QPushButton("⚙")
         self.settings_btn.setToolTip("设置")
         self.settings_btn.setFixedSize(28, 28)
-        self.settings_btn.setStyleSheet("background: transparent; color: #6c757d; font-size: 16px; padding: 0px;")
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: palette(window-text);
+                border: 1px solid transparent;
+                border-radius: 4px;
+                font-size: 18px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.14);
+                border: 1px solid rgba(128, 128, 128, 0.25);
+            }
+            QPushButton:pressed {
+                background-color: rgba(128, 128, 128, 0.24);
+            }
+        """)
         self.settings_btn.clicked.connect(self.open_settings)
         self.top_bar_layout.addWidget(self.settings_btn)
         
@@ -223,13 +241,13 @@ class ChatDockWidget(QDockWidget):
         # 1: Plan viewer
         self.plan_viewer = QTextBrowser()
         self.plan_viewer.setOpenExternalLinks(True)
-        self.plan_viewer.setStyleSheet("QTextBrowser { border: 1px solid #ced4da; border-radius: 8px; padding: 12px; font-size: 13px; }")
+        self.plan_viewer.setStyleSheet("QTextBrowser { color: palette(text); background-color: palette(base); border: 1px solid palette(mid); border-radius: 8px; padding: 12px; font-size: 13px; }")
         self.stacked_widget.addWidget(self.plan_viewer)
         
         # 2: Task viewer
         self.task_viewer = QTextBrowser()
         self.task_viewer.setOpenExternalLinks(True)
-        self.task_viewer.setStyleSheet("QTextBrowser { border: 1px solid #ced4da; border-radius: 8px; padding: 12px; font-size: 13px; }")
+        self.task_viewer.setStyleSheet("QTextBrowser { color: palette(text); background-color: palette(base); border: 1px solid palette(mid); border-radius: 8px; padding: 12px; font-size: 13px; }")
         self.stacked_widget.addWidget(self.task_viewer)
         
         self.layout.addWidget(self.stacked_widget)
@@ -265,7 +283,7 @@ class ChatDockWidget(QDockWidget):
         
         # Status Label
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #6c757d; font-size: 12px; font-style: italic;")
+        self.status_label.setStyleSheet("color: palette(mid); font-size: 12px; font-style: italic;")
         self.status_label.hide()
         self.layout.addWidget(self.status_label)
         
@@ -422,12 +440,13 @@ class ChatDockWidget(QDockWidget):
             try:
                 with open(task_path, 'r', encoding='utf-8') as f:
                     content = f.read()
+                    colors = self._theme_colors()
                     
                     # Regex replacement to catch [ ], [x], [/] even if preceded by #, *, -, or spaces
                     # Styled like Antigravity Checkboxes
-                    pending_icon = "<span style='color: #adb5bd; font-family: sans-serif; font-size: 14px; margin-right: 4px;'>◯</span>"
-                    done_icon = "<span style='color: #198754; font-family: sans-serif; font-size: 14px; margin-right: 4px;'>✅</span>"
-                    prog_icon = "<span style='color: #0d6efd; font-family: sans-serif; font-size: 14px; margin-right: 4px;'>🔄</span>"
+                    pending_icon = f"<span style='color: {colors['muted']}; font-family: sans-serif; font-size: 14px; margin-right: 4px;'>◯</span>"
+                    done_icon = f"<span style='color: {colors['agent']}; font-family: sans-serif; font-size: 14px; margin-right: 4px;'>✅</span>"
+                    prog_icon = f"<span style='color: {colors['link']}; font-family: sans-serif; font-size: 14px; margin-right: 4px;'>🔄</span>"
                     
                     # Capture the prefix (e.g. "### ", "- **") and preserve it, only replace the bracket part
                     content = re.sub(r'^([ \t*#>-]*?)\[\s*\]', r'\1' + pending_icon, content, flags=re.MULTILINE)
@@ -436,7 +455,19 @@ class ChatDockWidget(QDockWidget):
                     
                     if markdown:
                         html = markdown.markdown(content, extensions=['tables'])
-                        styled_html = f"<div style='line-height: 1.8; font-size: 14px; font-family: \"Segoe UI\", sans-serif;'>{html}</div>"
+                        styled_html = f"""
+                        <style>
+                            body {{ color: {colors['text']}; }}
+                            p, li, td, th {{ color: {colors['text']}; }}
+                            a {{ color: {colors['link']}; }}
+                            code, pre {{
+                                color: {colors['text']};
+                                background-color: {colors['code_bg']};
+                                border: 1px solid {colors['border']};
+                            }}
+                        </style>
+                        <div style='color: {colors['text']}; line-height: 1.8; font-size: 14px; font-family: "Segoe UI", sans-serif;'>{html}</div>
+                        """
                         self.task_viewer.setHtml(styled_html)
                     else:
                         self.task_viewer.setPlainText(content)
@@ -510,14 +541,20 @@ class ChatDockWidget(QDockWidget):
     def send_message(self):
         from qgis.core import QgsSettings
         s = QgsSettings()
-        if not s.value("qgis_agent/deepseek_api_key", "") or not s.value("qgis_agent/glm_api_key", ""):
-            QMessageBox.warning(self, "API Keys Required", "Please configure your API keys (DeepSeek and Zhipu) before using the agent.")
-            self.open_settings()
-            if not s.value("qgis_agent/deepseek_api_key", "") or not s.value("qgis_agent/glm_api_key", ""):
-                return
-                
         text = self.input_field.toPlainText().strip()
         has_image = bool(getattr(self, 'attached_image_path', None))
+        
+        if not s.value("qgis_agent/deepseek_api_key", ""):
+            QMessageBox.warning(self, "API Key Required", "Please configure your DeepSeek API key before using the agent.")
+            self.open_settings()
+            if not s.value("qgis_agent/deepseek_api_key", ""):
+                return
+        
+        if has_image and not s.value("qgis_agent/glm_api_key", ""):
+            QMessageBox.warning(self, "Vision API Key Required", "Please configure your GLM API key before sending images.")
+            self.open_settings()
+            if not s.value("qgis_agent/glm_api_key", ""):
+                return
         
         if text or has_image:
             model = getattr(self, 'current_model', 'deepseek-v4-flash')
@@ -590,15 +627,32 @@ class ChatDockWidget(QDockWidget):
                 pass
         else:
             QDesktopServices.openUrl(url)
+
+    def _theme_colors(self):
+        palette = QApplication.palette()
+        base = palette.color(QPalette.Base)
+        text = palette.color(QPalette.Text)
+        is_dark = base.lightness() < 128
+        return {
+            "text": text.name(),
+            "muted": "#adb5bd" if is_dark else "#6c757d",
+            "system": "#ced4da" if is_dark else "#495057",
+            "border": "#495057" if is_dark else "#dee2e6",
+            "link": "#4dabf7" if is_dark else "#0d6efd",
+            "agent": "#51cf66" if is_dark else "#198754",
+            "user": "#4dabf7" if is_dark else "#0d6efd",
+            "code_bg": "#2b3035" if is_dark else "#f8f9fa",
+        }
             
     def render_chat(self):
         import time
+        colors = self._theme_colors()
         html = ""
         for i, block in enumerate(self._chat_blocks):
             if block["role"] in ("USER", "AGENT"):
                 role = block["role"]
                 content = block["content"]
-                color = "#0d6efd" if role == "USER" else "#198754"
+                color = colors["user"] if role == "USER" else colors["agent"]
                 icon = "👤" if role == "USER" else "🤖"
                 try:
                     import markdown
@@ -607,7 +661,7 @@ class ChatDockWidget(QDockWidget):
                 except Exception:
                     html_content = content.replace('\n', '<br>')
                 
-                html += f"<div style='margin-bottom: 10px;'><b><span style='color: {color}; font-size: 14px;'>{icon} {role}</span></b><br><div style='color: #212529; margin-top: 5px;'>{html_content}</div></div>"
+                html += f"<div style='margin-bottom: 10px;'><b><span style='color: {color}; font-size: 14px;'>{icon} {role}</span></b><br><div style='color: {colors['text']}; margin-top: 5px;'>{html_content}</div></div>"
                 
             elif block["role"] == "SYSTEM_GROUP":
                 if block.get("end_time"):
@@ -618,24 +672,36 @@ class ChatDockWidget(QDockWidget):
                     time_str = f"Working... ({duration}s)"
                     
                 toggle_icon = "▶" if block["collapsed"] else "▼"
-                html += f"<div style='margin-bottom: 5px; margin-top: 10px;'><a href='toggle:{i}' style='color: #6c757d; text-decoration: none; font-size: 13px; font-weight: bold;'>{toggle_icon} {time_str}</a></div>"
+                html += f"<div style='margin-bottom: 5px; margin-top: 10px;'><a href='toggle:{i}' style='color: {colors['muted']}; text-decoration: none; font-size: 13px; font-weight: bold;'>{toggle_icon} {time_str}</a></div>"
                 
                 if not block["collapsed"]:
-                    html += "<div style='margin-left: 10px; border-left: 3px solid #dee2e6; padding-left: 10px; margin-bottom: 15px;'>"
+                    html += f"<div style='margin-left: 10px; border-left: 3px solid {colors['border']}; padding-left: 10px; margin-bottom: 15px;'>"
                     for msg in block["messages"]:
                         try:
                             import markdown
                             html_msg = markdown.markdown(msg, extensions=['tables', 'fenced_code'])
                         except:
                             html_msg = msg.replace('\n', '<br>')
-                        html += f"<div style='color: #495057; font-size: 12px; margin-bottom: 8px;'>{html_msg}</div>"
+                        html += f"<div style='color: {colors['system']}; font-size: 12px; margin-bottom: 8px;'>{html_msg}</div>"
                     html += "</div>"
                     
         scrollbar = self.chat_history.verticalScrollBar()
         v = scrollbar.value()
         at_bottom = (v >= scrollbar.maximum() - 10)
         
-        self.chat_history.setHtml(html)
+        base_style = f"""
+        <style>
+            body {{ color: {colors['text']}; }}
+            p, li, td, th {{ color: {colors['text']}; }}
+            a {{ color: {colors['link']}; }}
+            code, pre {{
+                color: {colors['text']};
+                background-color: {colors['code_bg']};
+                border: 1px solid {colors['border']};
+            }}
+        </style>
+        """
+        self.chat_history.setHtml(base_style + html)
         
         if at_bottom:
             from qgis.PyQt.QtCore import QTimer

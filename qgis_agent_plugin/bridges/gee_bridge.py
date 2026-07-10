@@ -7,6 +7,8 @@ from qgis.utils import iface
 
 logger = logging.getLogger(__name__)
 
+DRIVE_API_SAFE_DOWNLOAD_MB = 32
+
 def init_gee():
     """Helper function for the Agent to securely initialize GEE with UI fallback."""
     if not GEEAuth.authenticate_and_initialize():
@@ -98,12 +100,12 @@ class GEEAuth:
                         # Token is valid, but missing project ID! Don't re-auth, just ask for project.
                         project_id = GEEAuth.prompt_for_project()
                         if not project_id:
-                            iface.messageBar().pushMessage("GEE", "Earth Engine 需要绑定 Project ID。", level=Qgis.Critical)
+                            iface.messageBar().pushMessage("GEE", "Earth Engine 需要绑定 Project ID。", level=Qgis.MessageLevel.Critical)
                             return False
                     
                         settings.setValue("gee_agent_project_id", project_id)
                         ee.Initialize(project=project_id)
-                        iface.messageBar().pushMessage("GEE", f"已成功绑定至项目 {project_id}。", level=Qgis.Success)
+                        iface.messageBar().pushMessage("GEE", f"已成功绑定至项目 {project_id}。", level=Qgis.MessageLevel.Success)
                         return True
                     else:
                         # Token expired or other error, proceed to full auth
@@ -123,7 +125,7 @@ class GEEAuth:
                 )
                 
                 if reply == QMessageBox.Cancel:
-                    iface.messageBar().pushMessage("GEE", "认证已取消。", level=Qgis.Warning)
+                    iface.messageBar().pushMessage("GEE", "认证已取消。", level=Qgis.MessageLevel.Warning)
                     return False
                 
             # Use localhost:0 to tell the OS to allocate a dynamic random port!
@@ -138,12 +140,12 @@ class GEEAuth:
             # Now prompt for project ID
             project_id = GEEAuth.prompt_for_project()
             if not project_id:
-                iface.messageBar().pushMessage("GEE", "Project ID required for Earth Engine.", level=Qgis.Critical)
+                iface.messageBar().pushMessage("GEE", "Project ID required for Earth Engine.", level=Qgis.MessageLevel.Critical)
                 return False
                 
             settings.setValue("gee_agent_project_id", project_id)
             ee.Initialize(project=project_id)
-            iface.messageBar().pushMessage("GEE", f"Successfully authenticated to project {project_id}.", level=Qgis.Success)
+            iface.messageBar().pushMessage("GEE", f"Successfully authenticated to project {project_id}.", level=Qgis.MessageLevel.Success)
             return True
             
         except Exception as e:
@@ -226,7 +228,7 @@ class AgentMap:
         except Exception as e:
             logger.debug(f"Could not set extent from ee_object: {e}")
             
-        iface.messageBar().pushMessage("GEE", f"Layer '{name}' added successfully.", level=Qgis.Success)
+        iface.messageBar().pushMessage("GEE", f"Layer '{name}' added successfully.", level=Qgis.MessageLevel.Success)
         return layer
 
 import os
@@ -236,40 +238,53 @@ import shutil
 from qgis.core import QgsTask
 
 class GEEDownloadTask(QgsTask):
-    def __init__(self, description, download_url, dest_path, headers=None):
+    def __init__(self, description, download_url, dest_path, headers=None, expected_size=None):
         super().__init__(description, QgsTask.CanCancel)
         self.download_url = download_url
         self.dest_path = dest_path
         self.headers = headers or {}
+        self.expected_size = int(expected_size or 0)
         self.exception = None
         
     def run(self):
         import requests
         import os
+        part_path = f"{self.dest_path}.part"
         try:
             with requests.get(self.download_url, headers=self.headers, stream=True) as r:
                 r.raise_for_status()
                 total_length = r.headers.get('content-length')
+                total_length = int(total_length) if total_length else 0
                 
                 os.makedirs(os.path.dirname(self.dest_path), exist_ok=True)
-                with open(self.dest_path, 'wb') as f:
-                    if total_length is None:
-                        # No content length header
-                        for chunk in r.iter_content(chunk_size=8192):
-                            if self.isCanceled():
-                                return False
-                            f.write(chunk)
-                    else:
-                        total_length = int(total_length)
-                        downloaded = 0
-                        for chunk in r.iter_content(chunk_size=8192):
-                            if self.isCanceled():
-                                return False
-                            f.write(chunk)
-                            downloaded += len(chunk)
+                downloaded = 0
+                with open(part_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if self.isCanceled():
+                            try:
+                                f.close()
+                                os.remove(part_path)
+                            except Exception:
+                                pass
+                            return False
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_length > 0:
                             self.setProgress(downloaded / total_length * 100.0)
+                if total_length > 0 and downloaded != total_length:
+                    raise IOError(f"Incomplete download: got {downloaded} bytes, expected {total_length} bytes.")
+                if self.expected_size > 0 and downloaded != self.expected_size:
+                    raise IOError(f"Downloaded size mismatch: got {downloaded} bytes, Drive reported {self.expected_size} bytes.")
+                os.replace(part_path, self.dest_path)
             return True
         except Exception as e:
+            try:
+                if os.path.exists(part_path):
+                    os.remove(part_path)
+            except Exception:
+                pass
             self.exception = e
             return False
 
@@ -283,13 +298,20 @@ class GEEWaitTask(QgsTask):
     def run(self):
         import ee
         import time
+        import warnings
         start_time = time.time()
         while True:
             if self.isCanceled():
                 return False
                 
             try:
-                status_list = ee.data.getTaskStatus(self.task_id)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=r".*getTaskStatus\(\) is deprecated.*",
+                        category=DeprecationWarning,
+                    )
+                    status_list = ee.data.getTaskStatus(self.task_id)
                 if not status_list:
                     self.exception = Exception(f"Task ID {self.task_id} not found.")
                     return False
@@ -370,13 +392,20 @@ class GEECopyTask(QgsTask):
         
     def run(self):
         import os
+        part_path = f"{self.dest_path}.part"
         try:
             total_length = os.path.getsize(self.src_path)
             copied = 0
             with open(self.src_path, 'rb') as f_in:
-                with open(self.dest_path, 'wb') as f_out:
+                os.makedirs(os.path.dirname(self.dest_path), exist_ok=True)
+                with open(part_path, 'wb') as f_out:
                     while True:
                         if self.isCanceled():
+                            try:
+                                f_out.close()
+                                os.remove(part_path)
+                            except Exception:
+                                pass
                             return False
                         chunk = f_in.read(1024 * 1024 * 5) # 5MB chunks
                         if not chunk:
@@ -385,13 +414,71 @@ class GEECopyTask(QgsTask):
                         copied += len(chunk)
                         if total_length > 0:
                             self.setProgress(copied / total_length * 100.0)
+            if total_length > 0 and copied != total_length:
+                raise IOError(f"Incomplete local copy: got {copied} bytes, expected {total_length} bytes.")
+            os.replace(part_path, self.dest_path)
             return True
         except Exception as e:
+            try:
+                if os.path.exists(part_path):
+                    os.remove(part_path)
+            except Exception:
+                pass
             self.exception = e
             return False
 
 
 class GEEDownloader:
+    @staticmethod
+    def _format_drive_manual_download_message(target_files, folder_name, dest_dir, reason="", sync_path=""):
+        lines = [
+            "GEE export finished, but the plugin could not automatically download the exported file(s).",
+        ]
+        if reason:
+            lines.append(f"Reason: {reason}")
+        lines.extend([
+            "",
+            "Manual download steps:",
+            "1. Open Google Drive in your browser.",
+            f"2. Go to folder: {folder_name}",
+            "3. Download the following exported GeoTIFF file(s):",
+        ])
+        for f_info in target_files or []:
+            size_bytes = int(f_info.get("size", 0) or 0)
+            size_mb = size_bytes / (1024 * 1024) if size_bytes else 0
+            file_id = f_info.get("id", "")
+            link = f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
+            size_text = f"{size_mb:.1f} MB" if size_bytes else "unknown size"
+            lines.append(f"   - {f_info.get('name', '')} ({size_text})")
+            if link:
+                lines.append(f"     {link}")
+        lines.extend([
+            f"4. Save/copy the downloaded file(s) into: {dest_dir}",
+            "5. In QGIS Agent, run inspect_raster_file / validate_raster_has_data before using them.",
+        ])
+        if sync_path:
+            lines.extend([
+                "",
+                f"Configured local Google Drive path was: {sync_path}",
+                f"Expected synced folder: {os.path.join(sync_path, folder_name)}",
+            ])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _raise_manual_drive_download(target_files, folder_name, dest_dir, reason="", sync_path=""):
+        message = GEEDownloader._format_drive_manual_download_message(
+            target_files,
+            folder_name,
+            dest_dir,
+            reason=reason,
+            sync_path=sync_path,
+        )
+        try:
+            iface.messageBar().pushMessage("GEE Manual Download", message[:500], level=Qgis.MessageLevel.Critical, duration=30)
+        except Exception:
+            pass
+        raise Exception(message)
+
     @staticmethod
     def run_qgs_task_sync(task):
         from qgis.core import QgsApplication, QgsTask
@@ -424,7 +511,7 @@ class GEEDownloader:
         return True
 
     @staticmethod
-    def wait_for_drive_sync(task_id, folder_name, filename, dest_dir, drive_root=r"G:\我的云端硬盘", timeout=3600):
+    def wait_for_drive_sync(task_id, folder_name, filename, dest_dir, drive_root=r"G:\我的云端硬盘", timeout=3600, target_files=None):
         """
         Monitors a GEE export task and waits for Google Drive Desktop to sync the file locally.
         Once synced, copies the file to the destination directory and optionally cleans up the Drive copy.
@@ -437,9 +524,26 @@ class GEEDownloader:
         
         # 2. Wait for Google Drive Desktop to sync the file
         drive_dir = os.path.join(drive_root, folder_name)
+        if not os.path.exists(drive_root) or not os.path.isdir(drive_root):
+            GEEDownloader._raise_manual_drive_download(
+                target_files or [{"name": f"{filename}.tif"}],
+                folder_name,
+                dest_dir,
+                reason=f"Configured local Google Drive path does not exist: {drive_root}",
+                sync_path=drive_root,
+            )
         iface.messageBar().pushMessage("GEE Sync", f"Waiting for files to appear at {drive_dir}", level=Qgis.MessageLevel.Info)
         sync_task = GEEDriveSyncTask(f"Waiting for local sync: {filename}", drive_dir, filename, timeout)
-        GEEDownloader.run_qgs_task_sync(sync_task)
+        try:
+            GEEDownloader.run_qgs_task_sync(sync_task)
+        except Exception as exc:
+            GEEDownloader._raise_manual_drive_download(
+                target_files or [{"name": f"{filename}.tif"}],
+                folder_name,
+                dest_dir,
+                reason=f"Local Google Drive sync failed or timed out: {exc}",
+                sync_path=drive_root,
+            )
         iface.messageBar().pushMessage("GEE Sync", f"{len(sync_task.synced_files)} file(s) synced locally!", level=Qgis.MessageLevel.Success)
         
         # 3. Copy to destination
@@ -450,8 +554,18 @@ class GEEDownloader:
             dest_path = os.path.join(dest_dir, f_name)
             
             iface.messageBar().pushMessage("GEE", f"Copying {f_name} to project folder...", level=Qgis.MessageLevel.Info)
-            copy_task = GEECopyTask(f"Copying {f_name} from Google Drive", drive_path, dest_path)
-            GEEDownloader.run_qgs_task_sync(copy_task)
+            try:
+                copy_task = GEECopyTask(f"Copying {f_name} from Google Drive", drive_path, dest_path)
+                GEEDownloader.run_qgs_task_sync(copy_task)
+                GEEDownloader._validate_downloaded_raster(dest_path)
+            except Exception as exc:
+                GEEDownloader._raise_manual_drive_download(
+                    target_files or [{"name": f_name}],
+                    folder_name,
+                    dest_dir,
+                    reason=f"Local Google Drive synced file failed copy or validation: {exc}",
+                    sync_path=drive_root,
+                )
             copied_paths.append(dest_path)
             
             # 4. Clean up original file in Drive to save space
@@ -510,40 +624,67 @@ class GEEDownloader:
         iface.messageBar().pushMessage("GEE", f"File size on Drive: {total_size_mb:.1f} MB", level=Qgis.MessageLevel.Info)
         
         # Smart Routing Tier Logic
-        if total_size_mb > 500:
-            iface.messageBar().pushMessage("GEE", f"Data >500MB ({total_size_mb:.1f}MB). Falling back to Local Client Sync...", level=Qgis.MessageLevel.Warning)
-            settings = QgsSettings()
-            sync_path = settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘")
+        settings = QgsSettings()
+        sync_path = settings.value("qgis_agent/gee_drive_sync_path", r"G:\我的云端硬盘")
+        if total_size_mb > DRIVE_API_SAFE_DOWNLOAD_MB:
+            iface.messageBar().pushMessage("GEE", f"Data >{DRIVE_API_SAFE_DOWNLOAD_MB}MB ({total_size_mb:.1f}MB). Falling back to Local Client Sync...", level=Qgis.MessageLevel.Warning)
+            return GEEDownloader.wait_for_drive_sync(
+                task_id,
+                folder_name,
+                filename,
+                dest_dir,
+                drive_root=sync_path,
+                timeout=timeout,
+                target_files=target_files,
+            )
             
-            if not os.path.exists(sync_path):
-                iface.messageBar().pushMessage("CRITICAL", f"Local drive path '{sync_path}' not found! Please manually download from Google Drive web.", level=Qgis.MessageLevel.Critical, duration=20)
-            
-            return GEEDownloader.wait_for_drive_sync(task_id, folder_name, filename, dest_dir, drive_root=sync_path, timeout=timeout)
-            
-        # Else: <= 500MB, download via API
+        # Small exports only: keep Drive API direct download conservative because
+        # larger GeoTIFF streams have repeatedly produced corrupted tiled TIFFs.
         os.makedirs(dest_dir, exist_ok=True)
         downloaded_paths = []
         
         # 4. Download file(s)
-        for idx, f_info in enumerate(target_files):
-            file_id = f_info['id']
-            f_name = f_info['name']
-            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-            dest_path = os.path.join(dest_dir, f_name)
-            
-            iface.messageBar().pushMessage("GEE", f"Downloading {f_name} ({idx+1}/{len(target_files)})...", level=Qgis.MessageLevel.Info)
-            dl_task = GEEDownloadTask(f"Downloading {f_name}", download_url, dest_path, headers)
-            GEEDownloader.run_qgs_task_sync(dl_task)
-            downloaded_paths.append(dest_path)
-            
-            # 5. Clean up from Drive
-            try:
-                requests.delete(f"https://www.googleapis.com/drive/v3/files/{file_id}", headers=headers)
-            except:
-                pass
+        try:
+            for idx, f_info in enumerate(target_files):
+                file_id = f_info['id']
+                f_name = f_info['name']
+                download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+                dest_path = os.path.join(dest_dir, f_name)
+                expected_size = int(f_info.get('size', 0) or 0)
                 
-        if len(target_files) > 0:
-            iface.messageBar().pushMessage("GEE", f"Cleaned up {len(target_files)} file(s) from Google Drive.", level=Qgis.MessageLevel.Success)
+                iface.messageBar().pushMessage("GEE", f"Downloading {f_name} ({idx+1}/{len(target_files)}) via Drive API...", level=Qgis.MessageLevel.Info)
+                dl_task = GEEDownloadTask(f"Downloading {f_name}", download_url, dest_path, headers, expected_size=expected_size)
+                GEEDownloader.run_qgs_task_sync(dl_task)
+                GEEDownloader._validate_downloaded_raster(dest_path)
+                downloaded_paths.append(dest_path)
+
+            # 5. Clean up from Drive only after every local file validates.
+            for f_info in target_files:
+                try:
+                    file_id = f_info['id']
+                    requests.delete(f"https://www.googleapis.com/drive/v3/files/{file_id}", headers=headers)
+                except:
+                    pass
+                    
+            if len(target_files) > 0:
+                iface.messageBar().pushMessage("GEE", f"Cleaned up {len(target_files)} file(s) from Google Drive.", level=Qgis.MessageLevel.Success)
+        except Exception as api_exc:
+            iface.messageBar().pushMessage(
+                "GEE",
+                f"Drive API download/validation failed. Falling back to local Google Drive sync: {api_exc}",
+                level=Qgis.MessageLevel.Warning,
+                duration=20,
+            )
+            logger.warning(f"Drive API download failed, falling back to local sync: {api_exc}")
+            return GEEDownloader.wait_for_drive_sync(
+                task_id,
+                folder_name,
+                filename,
+                dest_dir,
+                drive_root=sync_path,
+                timeout=timeout,
+                target_files=target_files,
+            )
             
         # 6. Merge if multiple slices
         if len(downloaded_paths) == 1:
@@ -558,6 +699,20 @@ class GEEDownloader:
             except Exception as e:
                 logger.error(f"Failed to build VRT: {e}")
                 return downloaded_paths[0]
+
+    @staticmethod
+    def _validate_downloaded_raster(path):
+        from ..core.raster_validation import inspect_raster_file, validate_raster_has_data
+
+        inspection = inspect_raster_file(path, force_read=True)
+        if not inspection.get("ok"):
+            message = inspection.get("message") or f"Raster integrity check failed: {path}"
+            raise Exception(message)
+        validation = validate_raster_has_data(path, bands=[1], min_valid_percent=0.01, force_read=True)
+        if not validation.get("ok"):
+            message = validation.get("message") or f"Raster contains no usable data: {path}"
+            raise Exception(message)
+        return validation
 
     @staticmethod
     def download_ee_object(ee_object, filename, dest_dir, scale=30, region=None, crs='EPSG:4326', exact_geom=None):

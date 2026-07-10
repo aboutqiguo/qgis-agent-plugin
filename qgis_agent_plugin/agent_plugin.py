@@ -1,19 +1,25 @@
 import os
+import time
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtGui import QIcon
-from .ui.chat_dockwidget import ChatDockWidget
-from .core.harness_thread import HarnessThread
 
 class QGISAIAgentPlugin:
     def __init__(self, iface):
         self.iface = iface
         self.plugin_dir = os.path.dirname(__file__)
+        self.action = None
         self.dockwidget = None
         self.harness_thread = None
         from .utils.logger import get_logger
         self.logger = get_logger()
         self.global_messages = []
+        self._project_event_debounce_seconds = 1.2
+        self._last_project_event_signature = None
+        self._last_project_event_time = 0.0
+        self._memory_loading = False
+        self._loaded_memory_project_key = None
+        self._last_memory_load_time = 0.0
         
         from qgis.core import QgsProject
         QgsProject.instance().readProject.connect(self.on_project_loaded)
@@ -21,7 +27,7 @@ class QGISAIAgentPlugin:
         QgsProject.instance().projectSaved.connect(self.on_project_saved)
         
         # Load memory for whatever project is initially active
-        self.load_memory()
+        self.load_memory(force=True)
         
         # Check for updates on startup if enabled
         from qgis.core import QgsSettings
@@ -43,7 +49,8 @@ class QGISAIAgentPlugin:
 
     def initGui(self):
         icon_path = os.path.join(self.plugin_dir, 'icon.png')
-        self.action = QAction(QIcon(icon_path), "QGIS AI Agent Copilot", self.iface.mainWindow())
+        icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
+        self.action = QAction(icon, "QGIS AI Agent Copilot", self.iface.mainWindow())
         self.action.triggered.connect(self.run)
         self.iface.addPluginToMenu("&QGIS AI Agent", self.action)
         self.iface.addToolBarIcon(self.action)
@@ -56,8 +63,9 @@ class QGISAIAgentPlugin:
             self.iface.removeDockWidget(self.dockwidget)
             self.dockwidget = None
         if self.harness_thread and self.harness_thread.isRunning():
-            self.harness_thread.is_killed = True
-            self.harness_thread.wait()
+            self.handle_stop_agent()
+            if not self.harness_thread.wait(5000):
+                self.logger.warning("Agent thread did not stop within 5 seconds during unload.")
             
         # Ensure logger handles are closed so QGIS can delete the folder on uninstall
         from .utils.logger import close_logger
@@ -91,6 +99,8 @@ class QGISAIAgentPlugin:
             self.harness_thread.plan_approval_event.set()
             self.harness_thread.code_exec_event.set()
             self.harness_thread.destructive_auth_event.set()
+            self.harness_thread.canvas_image_event.set()
+            self.harness_thread.atomic_tool_event.set()
 
     def handle_user_message(self, message, model, effort, mode):
         from .core.harness_thread import HarnessThread
@@ -102,6 +112,9 @@ class QGISAIAgentPlugin:
             self.harness_thread.model_name = model
             self.harness_thread.effort_level = effort
             self.harness_thread.work_mode = mode
+            if mode == "PLAN":
+                self.harness_thread.plan_approved = False
+                self.harness_thread.plan_approval_response = ""
             self.logger.info(f"Hot switched model to {model}, effort to {effort}, and mode to {mode}")
             
             self.harness_thread.messages.append({"role": "user", "content": message})
@@ -155,8 +168,8 @@ class QGISAIAgentPlugin:
                 pixmap.save(img_path)
                 result = f"[IMAGE_PATH]{img_path}"
             else:
-                from .tools.tools import execute_atomic_tool
-                result = execute_atomic_tool(self.iface, name, kwargs)
+                from .tools.tools import execute_atomic_tool_structured
+                result = execute_atomic_tool_structured(self.iface, name, kwargs)
         except Exception as e:
             result = f"Error: {str(e)}"
             
@@ -214,6 +227,99 @@ class QGISAIAgentPlugin:
             self.harness_thread.plan_approval_response = action
             self.harness_thread.plan_approval_event.set()
 
+    def _canonical_layer_source(self, source):
+        if not source:
+            return ""
+        source = str(source).strip().strip('"')
+        head, sep, tail = source.partition("|")
+        normalized_head = head.replace("\\", "/")
+        try:
+            if os.path.isabs(head) or os.path.exists(head):
+                normalized_head = os.path.normcase(os.path.abspath(head)).replace("\\", "/")
+        except Exception:
+            pass
+        return f"{normalized_head}{sep}{tail}"
+
+    def _snapshot_project_layers(self):
+        try:
+            from qgis.core import QgsProject, QgsRasterLayer, QgsVectorLayer
+            snapshot = {}
+            for layer_id, layer in QgsProject.instance().mapLayers().items():
+                if isinstance(layer, QgsRasterLayer):
+                    layer_type = "raster"
+                elif isinstance(layer, QgsVectorLayer):
+                    layer_type = "vector"
+                else:
+                    layer_type = "other"
+                try:
+                    source = self._canonical_layer_source(layer.source())
+                except Exception:
+                    source = ""
+                try:
+                    name = layer.name()
+                except Exception:
+                    name = layer_id
+                snapshot[layer_id] = {"id": layer_id, "name": name, "source": source, "type": layer_type}
+            return snapshot
+        except Exception as e:
+            self.logger.warning(f"Failed to snapshot project layers: {e}")
+            return {}
+
+    def _cleanup_new_duplicate_layers(self, before_snapshot):
+        try:
+            from qgis.core import QgsProject
+            project = QgsProject.instance()
+            after_snapshot = self._snapshot_project_layers()
+            groups = {}
+            for layer_id, info in after_snapshot.items():
+                source = info.get("source", "")
+                if not source or source.startswith("memory:"):
+                    continue
+                groups.setdefault(source, []).append(info)
+
+            removed = []
+            for source, layers in groups.items():
+                if len(layers) < 2:
+                    continue
+                existing_ids = [info["id"] for info in layers if info["id"] in before_snapshot]
+                new_ids = [info["id"] for info in layers if info["id"] not in before_snapshot]
+                if existing_ids:
+                    remove_ids = new_ids
+                else:
+                    remove_ids = new_ids[1:]
+                for layer_id in remove_ids:
+                    info = after_snapshot.get(layer_id, {})
+                    try:
+                        project.removeMapLayer(layer_id)
+                        removed.append(f"{info.get('name', layer_id)} -> {source}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to remove duplicate layer {layer_id}: {e}")
+            if removed:
+                self.logger.info(f"Removed duplicate layers added by script: {removed}")
+            return removed
+        except Exception as e:
+            self.logger.warning(f"Failed to clean duplicate layers: {e}")
+            return []
+
+    def _format_layer_delta(self, before_snapshot, after_snapshot, removed_duplicates=None):
+        removed_duplicates = removed_duplicates or []
+        added = [info for layer_id, info in after_snapshot.items() if layer_id not in before_snapshot]
+        removed = [info for layer_id, info in before_snapshot.items() if layer_id not in after_snapshot]
+        lines = []
+        if added:
+            lines.append("Added layers:")
+            for info in added[:10]:
+                lines.append(f"- {info.get('name')} ({info.get('type')}): {info.get('source')}")
+        if removed:
+            lines.append("Removed layers:")
+            for info in removed[:10]:
+                lines.append(f"- {info.get('name')} ({info.get('type')}): {info.get('source')}")
+        if removed_duplicates:
+            lines.append("Automatically removed duplicate layers added by this script:")
+            for item in removed_duplicates[:10]:
+                lines.append(f"- {item}")
+        return "\n".join(lines)
+
     def handle_code_execution(self, code):
         """Executes the Python code safely on the main Qt thread and captures stdout."""
         import sys
@@ -236,7 +342,7 @@ class QGISAIAgentPlugin:
         env_dict['QgsGeometry'] = QgsGeometry
         
         try:
-            from qgis.core import QgsProcessingFeedback, Qgis, QgsApplication
+            from qgis.core import QgsProcessingFeedback, Qgis, QgsApplication, QgsRasterBandStats
             from qgis.PyQt.QtCore import QCoreApplication
             class PrintFeedback(QgsProcessingFeedback):
                 def setProgress(self, progress):
@@ -255,11 +361,19 @@ class QGISAIAgentPlugin:
                 def pushConsoleInfo(self, info):
                     print(f"QGIS CONSOLE: {info}")
             env_dict['PrintFeedback'] = PrintFeedback
+            env_dict['Qgis'] = Qgis
+            env_dict['QgsApplication'] = QgsApplication
+            env_dict['QgsProcessingFeedback'] = QgsProcessingFeedback
+            env_dict['QgsRasterBandStats'] = QgsRasterBandStats
+            env_dict['QCoreApplication'] = QCoreApplication
             
             # Setup global message log interceptor for async warnings (e.g. WMS tile failures)
             captured_logs = []
+            message_level = getattr(Qgis, "MessageLevel", Qgis)
+            warning_level = getattr(message_level, "Warning", getattr(Qgis, "Warning", None))
+            critical_level = getattr(message_level, "Critical", getattr(Qgis, "Critical", None))
             def log_interceptor(msg, tag, level):
-                if level in (Qgis.Warning, Qgis.Critical):
+                if level in (warning_level, critical_level):
                     # Filter out benign warnings if necessary, but capture most
                     captured_logs.append(f"[{tag}] {msg}")
             
@@ -269,6 +383,7 @@ class QGISAIAgentPlugin:
             pass
         
         f = io.StringIO()
+        layer_snapshot_before = self._snapshot_project_layers()
         try:
             import ast
             class SecurityASTVisitor(ast.NodeVisitor):
@@ -326,7 +441,7 @@ class QGISAIAgentPlugin:
             if getattr(self, 'previous_execution_failed', False):
                 output += "\n\n[SYSTEM: 你的代码终于执行成功了！但这说明你刚才犯了错并完成了自我修正。在此刻，你【必须】立刻停下手中的主线任务，优先使用 write_file 工具将错误原因和修复代码写入 MEMORY.md！不准直接进行下一步！]"
             self.previous_execution_failed = False
-        except Exception as e:
+        except Exception:
             self.previous_execution_failed = True
             stdout_str = f.getvalue().strip()
             tb = traceback.format_exc()
@@ -358,6 +473,15 @@ class QGISAIAgentPlugin:
                 QgsApplication.messageLog().messageReceived.disconnect(log_interceptor)
             except:
                 pass
+
+        try:
+            removed_duplicates = self._cleanup_new_duplicate_layers(layer_snapshot_before)
+            layer_snapshot_after = self._snapshot_project_layers()
+            layer_delta = self._format_layer_delta(layer_snapshot_before, layer_snapshot_after, removed_duplicates)
+            if layer_delta:
+                output += "\n\n[PROJECT LAYER CHANGES]\n" + layer_delta
+        except Exception as e:
+            self.logger.warning(f"Failed to append layer change summary: {e}")
             
         if self.harness_thread:
             self.harness_thread.code_exec_response = output
@@ -376,7 +500,7 @@ class QGISAIAgentPlugin:
         try:
             from .core.sqlite_memory import SqliteMemoryDB
             db = SqliteMemoryDB()
-            if self.harness_thread and self.harness_thread.isRunning():
+            if self.harness_thread:
                 messages_to_save = [m for m in self.harness_thread.messages if m.get("role") != "system"]
             else:
                 messages_to_save = [m for m in self.global_messages if m.get("role") != "system"]
@@ -386,30 +510,85 @@ class QGISAIAgentPlugin:
         except Exception as e:
             self.logger.error(f"Failed to save sandbox memory: {e}")
 
-    def load_memory(self):
+    def _current_project_key(self):
+        try:
+            from qgis.core import QgsProject
+            project = QgsProject.instance()
+            project_path = ""
+            for attr in ("absoluteFilePath", "fileName"):
+                try:
+                    value = getattr(project, attr)()
+                except Exception:
+                    value = ""
+                if value:
+                    project_path = value
+                    break
+            home_path = project.homePath() or ""
+            return "|".join([
+                os.path.normcase(os.path.abspath(project_path)) if project_path else "<unsaved>",
+                os.path.normcase(os.path.abspath(home_path)) if home_path else "<no_home>",
+            ])
+        except Exception as e:
+            self.logger.warning(f"Failed to build project key: {e}")
+            return "<unknown_project>"
+
+    def _handle_project_context_changed(self, event_type):
+        project_key = self._current_project_key()
+        signature = f"{event_type}:{project_key}"
+        now = time.monotonic()
+        if (
+            signature == self._last_project_event_signature
+            and now - self._last_project_event_time < self._project_event_debounce_seconds
+        ):
+            self.logger.info(f"Skipped duplicate project event: {signature}")
+            return
+
+        self._last_project_event_signature = signature
+        self._last_project_event_time = now
+        self.logger.info(f"Project {event_type}, switching agent sandbox. project_key={project_key}")
+        if self.harness_thread and self.harness_thread.isRunning():
+            self.handle_stop_agent()
+        self.load_memory()
+
+    def load_memory(self, force=False):
+        project_key = self._current_project_key()
+        now = time.monotonic()
+        if self._memory_loading:
+            self.logger.info(f"Skipped re-entrant memory load for project_key={project_key}")
+            return
+        if (
+            not force
+            and project_key == self._loaded_memory_project_key
+            and now - self._last_memory_load_time < self._project_event_debounce_seconds
+        ):
+            self.logger.info(f"Skipped duplicate memory load for project_key={project_key}")
+            return
+
+        self._memory_loading = True
         self.global_messages = []
         try:
             from .core.sqlite_memory import SqliteMemoryDB
             db = SqliteMemoryDB()
             self.global_messages = db.load_messages()
-            self.logger.info("Loaded sandbox memory from SQLite")
+            self._loaded_memory_project_key = project_key
+            self._last_memory_load_time = now
+            self.logger.info(
+                f"Loaded sandbox memory from SQLite: {len(self.global_messages)} messages, "
+                f"project_key={project_key}"
+            )
         except Exception as e:
             self.logger.error(f"Failed to load sandbox memory: {e}")
+        finally:
+            self._memory_loading = False
                 
         if self.dockwidget:
             self.dockwidget.load_history(self.global_messages)
 
     def on_project_loaded(self):
-        self.logger.info("Project loaded, switching agent sandbox.")
-        if self.harness_thread and self.harness_thread.isRunning():
-            self.handle_stop_agent()
-        self.load_memory()
+        self._handle_project_context_changed("loaded")
 
     def on_project_cleared(self):
-        self.logger.info("Project cleared, resetting agent sandbox.")
-        if self.harness_thread and self.harness_thread.isRunning():
-            self.handle_stop_agent()
-        self.load_memory()
+        self._handle_project_context_changed("cleared")
 
     def on_project_saved(self):
         self.save_memory()

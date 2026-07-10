@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugins>
-    <pyqgis_plugin name="QGIS AI Agent Copilot" version="1.0.0">
-        <description>An AI-powered GIS Agent using DeepSeek LLM for natural language geoprocessing and interaction.</description>
-        <about>An AI-powered GIS Agent using DeepSeek LLM for natural language geoprocessing and interaction. Supports GEE smart routing and Vision models.</about>
-        <version>1.0.0</version>
-        <qgis_minimum_version>4.0</qgis_minimum_version>
-        <qgis_maximum_version>4.99</qgis_maximum_version>
-        <homepage>https://github.com/YOUR_USERNAME/qgis_agent_plugin</homepage>
-        <file_name>qgis_agent_plugin_v1.0.0.zip</file_name>
+    <pyqgis_plugin name="QGIS AI Agent Copilot" version="1.3.2">
+        <description>An AI-powered GIS Agent using DeepSeek LLM and free Zhipu GLM vision models for natural language geoprocessing and visual assistance.</description>
+        <about>An AI-powered GIS Agent using DeepSeek LLM for main reasoning, plus free Zhipu GLM vision models for screenshots, map canvas review, and image attachments.</about>
+        <version>1.3.2</version>
+        <qgis_minimum_version>3.28</qgis_minimum_version>
+        <qgis_maximum_version>3.99</qgis_maximum_version>
+        <homepage>https://github.com/aboutqiguo/qgis-agent-plugin</homepage>
+        <file_name>qgis_agent_plugin_v1.3.2.zip</file_name>
         <author_name>SevenLita</author_name>
         <!-- CRITICAL: Change download_url to the raw URL of the ZIP file hosted on GitHub Releases or Github Pages -->
-        <download_url>https://github.com/YOUR_USERNAME/qgis_agent_plugin/releases/download/v1.0.0/qgis_agent_plugin_v1.0.0.zip</download_url>
+        <download_url>https://github.com/aboutqiguo/qgis-agent-plugin/releases/download/v1.3.2/qgis_agent_plugin_v1.3.2.zip</download_url>
         <uploaded_by>SevenLita</uploaded_by>
         <create_date>2026-06-14T00:00:00</create_date>
-        <update_date>2026-06-14T00:00:00</update_date>
+        <update_date>2026-07-10T00:00:00</update_date>
         <experimental>False</experimental>
         <deprecated>False</deprecated>
-        <tracker>https://github.com/YOUR_USERNAME/qgis_agent_plugin/issues</tracker>
-        <repository>https://github.com/YOUR_USERNAME/qgis_agent_plugin</repository>
+        <tracker>https://github.com/aboutqiguo/qgis-agent-plugin/issues</tracker>
+        <repository>https://github.com/aboutqiguo/qgis-agent-plugin</repository>
         <tags>AI, LLM, DeepSeek, Earth Engine, Automation</tags>
     </pyqgis_plugin>
 </plugins>

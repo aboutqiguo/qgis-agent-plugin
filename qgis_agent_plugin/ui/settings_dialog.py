@@ -1,9 +1,53 @@
-import os
 from qgis.PyQt.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                                 QLineEdit, QPushButton, QGroupBox, QMessageBox,
-                                 QListWidget, QStackedWidget, QWidget, QFrame, QComboBox)
+                                 QLineEdit, QPushButton, QMessageBox,
+                                 QListWidget, QStackedWidget, QWidget, QComboBox,
+                                 QProgressBar)
 from qgis.PyQt.QtCore import Qt
-from qgis.core import QgsSettings, QgsProject
+from qgis.core import QgsSettings
+
+DEFAULT_GLM_VISION_MODEL = "glm-4v-flash"
+FREE_GLM_VISION_MODELS = [
+    ("GLM-4V-Flash (免费，默认轻量)", "glm-4v-flash"),
+    ("GLM-4.6V-Flash (免费，增强视觉)", "glm-4.6v-flash"),
+    ("GLM-4.1V-Thinking-Flash (免费，视觉推理)", "glm-4.1v-thinking-flash"),
+]
+
+def _build_glm_verify_image_data_url():
+    import base64
+    import struct
+    import zlib
+
+    width = 64
+    height = 64
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            if x < width // 2 and y < height // 2:
+                row.extend((31, 111, 235))
+            elif x >= width // 2 and y < height // 2:
+                row.extend((255, 255, 255))
+            elif x < width // 2:
+                row.extend((25, 135, 84))
+            else:
+                row.extend((220, 53, 69))
+        rows.append(bytes(row))
+
+    def chunk(tag, data):
+        body = tag + data
+        return (
+            struct.pack(">I", len(data))
+            + body
+            + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(b"".join(rows)))
+        + chunk(b"IEND", b"")
+    )
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -128,9 +172,8 @@ class SettingsDialog(QDialog):
         layout.addLayout(self.create_form_row("API Key", self.glm_key_input, "您的专属认证密钥。"))
         
         self.glm_vision_combo = QComboBox()
-        self.glm_vision_combo.addItem("GLM-4V-Flash", "glm-4v-flash")
-        self.glm_vision_combo.addItem("GLM-4.6V-Flash", "glm-4.6v-flash")
-        self.glm_vision_combo.addItem("GLM-4V", "glm-4v")
+        for label, model_id in FREE_GLM_VISION_MODELS:
+            self.glm_vision_combo.addItem(label, model_id)
         layout.addLayout(self.create_form_row("视觉模型 (Vision Model)", self.glm_vision_combo, "用于解析图像、屏幕截图的视觉辅助大模型。"))
         
         self.verify_glm_btn = QPushButton("验证智谱连接 (Verify)")
@@ -174,13 +217,13 @@ class SettingsDialog(QDialog):
         
         layout.addSpacing(20)
         
-        from qgis.PyQt.QtWidgets import QGroupBox, QComboBox
+        from qgis.PyQt.QtWidgets import QGroupBox
         download_group = QGroupBox("数据下载策略 (Download Strategy)")
         download_group.setStyleSheet("font-weight: bold;")
         dl_layout = QVBoxLayout()
         download_group.setLayout(dl_layout)
         
-        dl_layout.addWidget(QLabel("智能路由：下载 GEE 超大范围数据 (>500MB) 时，Agent 将回退到本地客户端同步方案。"))
+        dl_layout.addWidget(QLabel("智能路由：GEE 导出 <=32MB 时优先使用 Drive API 直连下载；超过 32MB 或栅格校验失败时，回退到本地 Google Drive Desktop 同步，仍失败则给出手动下载链接。"))
         
         self.dl_path_label = QLabel("Google Drive 本地挂载路径 (Drive Path):")
         self.dl_path_label.setStyleSheet("font-weight: normal; margin-top: 10px;")
@@ -196,7 +239,7 @@ class SettingsDialog(QDialog):
         return page
 
     def build_memory_page(self):
-        from qgis.PyQt.QtWidgets import QTextEdit
+        from qgis.PyQt.QtWidgets import QGroupBox, QTextEdit
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignTop)
@@ -227,6 +270,51 @@ class SettingsDialog(QDialog):
         self.project_memory_input.setPlaceholderText("例如：本工程所有的矢量数据都使用 EPSG:3857...")
         self.project_memory_input.setMaximumHeight(100)
         layout.addWidget(self.project_memory_input)
+
+        catalog_group = QGroupBox("本地能力目录 (Local QGIS Catalog)")
+        catalog_group.setStyleSheet("font-weight: bold;")
+        catalog_layout = QVBoxLayout(catalog_group)
+
+        catalog_desc = QLabel(
+            "主动构建当前 QGIS Processing Toolbox、参数类型、表达式函数等本地索引。"
+            "安装或启用新处理插件后建议刷新一次。"
+        )
+        catalog_desc.setWordWrap(True)
+        catalog_desc.setStyleSheet("font-weight: normal; color: #6c757d; font-size: 12px;")
+        catalog_layout.addWidget(catalog_desc)
+
+        self.catalog_status_label = QLabel("Catalog 状态：尚未检查")
+        self.catalog_status_label.setWordWrap(True)
+        self.catalog_status_label.setStyleSheet(
+            "font-weight: normal; padding: 10px; background-color: #f8f9fa; "
+            "border: 1px solid #dee2e6; border-radius: 4px;"
+        )
+        catalog_layout.addWidget(self.catalog_status_label)
+
+        self.catalog_progress = QProgressBar()
+        self.catalog_progress.setRange(0, 100)
+        self.catalog_progress.setValue(0)
+        self.catalog_progress.setTextVisible(True)
+        self.catalog_progress.setStyleSheet("font-weight: normal;")
+        catalog_layout.addWidget(self.catalog_progress)
+
+        catalog_btn_layout = QHBoxLayout()
+        self.build_catalog_btn = QPushButton("构建/刷新本地 Catalog")
+        self.build_catalog_btn.setStyleSheet(
+            "font-weight: bold; padding: 8px; background-color: #198754; "
+            "color: white; border-radius: 4px;"
+        )
+        self.build_catalog_btn.clicked.connect(self.build_local_catalog)
+
+        self.refresh_catalog_status_btn = QPushButton("刷新状态")
+        self.refresh_catalog_status_btn.setStyleSheet("font-weight: normal; padding: 8px; border-radius: 4px;")
+        self.refresh_catalog_status_btn.clicked.connect(self.update_catalog_status)
+
+        catalog_btn_layout.addWidget(self.build_catalog_btn)
+        catalog_btn_layout.addWidget(self.refresh_catalog_status_btn)
+        catalog_layout.addLayout(catalog_btn_layout)
+
+        layout.addWidget(catalog_group)
         
         return page
 
@@ -305,8 +393,10 @@ class SettingsDialog(QDialog):
         self.glm_url_input.setText(self.settings.value("qgis_agent/glm_base_url", "https://open.bigmodel.cn/api/paas/v4"))
         self.glm_key_input.setText(self.settings.value("qgis_agent/glm_api_key", ""))
         
-        vision_model = self.settings.value("qgis_agent/glm_vision_model", "glm-4v-flash")
+        vision_model = self.settings.value("qgis_agent/glm_vision_model", DEFAULT_GLM_VISION_MODEL)
         index = self.glm_vision_combo.findData(vision_model)
+        if index < 0:
+            index = self.glm_vision_combo.findData(DEFAULT_GLM_VISION_MODEL)
         if index >= 0:
             self.glm_vision_combo.setCurrentIndex(index)
         
@@ -325,10 +415,14 @@ class SettingsDialog(QDialog):
 
         self.personality_input.setPlainText(self.settings.value("qgis_agent/agent_personality", ""))
         import os
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         user_md_path = os.path.join(plugin_dir, "USER.md")
+        legacy_user_md_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "USER.md")
         if os.path.exists(user_md_path):
             with open(user_md_path, "r", encoding="utf-8") as f:
+                self.global_memory_input.setPlainText(f.read())
+        elif os.path.exists(legacy_user_md_path):
+            with open(legacy_user_md_path, "r", encoding="utf-8") as f:
                 self.global_memory_input.setPlainText(f.read())
         else:
             self.global_memory_input.setPlainText("")
@@ -348,6 +442,7 @@ class SettingsDialog(QDialog):
         # 加载自动更新设置
         auto_update = self.settings.value("qgis_agent/auto_check_update", False, type=bool)
         self.auto_update_cb.setChecked(auto_update)
+        self.update_catalog_status()
 
     def save_settings(self):
         self.settings.setValue("qgis_agent/deepseek_base_url", self.ds_url_input.text().strip())
@@ -359,7 +454,7 @@ class SettingsDialog(QDialog):
         
         self.settings.setValue("qgis_agent/agent_personality", self.personality_input.toPlainText())
         import os
-        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         user_md_path = os.path.join(plugin_dir, "USER.md")
         try:
             with open(user_md_path, "w", encoding="utf-8") as f:
@@ -383,6 +478,109 @@ class SettingsDialog(QDialog):
         
         QMessageBox.information(self, "设置已保存", "所有配置（包括记忆内容）已成功保存。")
         self.accept()
+
+    def update_catalog_status(self):
+        try:
+            import os
+            import sqlite3
+            from ..core.processing_catalog import QgisCatalogDB
+
+            db = QgisCatalogDB()
+            path = db.db_path
+            if not os.path.exists(path):
+                self.catalog_status_label.setText(
+                    f"Catalog 状态：未构建<br>数据库路径：<code>{path}</code>"
+                )
+                return
+
+            conn = sqlite3.connect(path)
+            cur = conn.cursor()
+            def meta_value(key):
+                try:
+                    cur.execute("SELECT value FROM catalog_meta WHERE key = ?", (key,))
+                    row = cur.fetchone()
+                    return row[0] if row else ""
+                except Exception:
+                    return ""
+
+            def table_count(name):
+                try:
+                    cur.execute(f"SELECT COUNT(*) FROM {name}")
+                    return int(cur.fetchone()[0])
+                except Exception:
+                    return 0
+
+            processing_built_at = meta_value("processing_built_at") or "未知"
+            expression_built_at = meta_value("expression_built_at") or "未知"
+            alg_count = table_count("processing_algorithms")
+            param_count = table_count("processing_parameters")
+            expr_count = table_count("expression_functions")
+            conn.close()
+
+            self.catalog_status_label.setText(
+                "Catalog 状态：已构建<br>"
+                f"Processing 算法：<b>{alg_count}</b>，参数：<b>{param_count}</b>，"
+                f"表达式函数：<b>{expr_count}</b><br>"
+                f"Processing 构建时间：{processing_built_at}<br>"
+                f"Expression 构建时间：{expression_built_at}<br>"
+                f"数据库路径：<code>{path}</code>"
+            )
+        except Exception as e:
+            self.catalog_status_label.setText(f"Catalog 状态读取失败：{e}")
+
+    def set_catalog_progress(self, value, message):
+        from qgis.PyQt.QtCore import QCoreApplication
+
+        value = max(0, min(int(value), 100))
+        self.catalog_progress.setValue(value)
+        self.catalog_status_label.setText(f"Catalog 状态：{message}")
+        QCoreApplication.processEvents()
+
+    def build_local_catalog(self):
+        from qgis.PyQt.QtCore import QCoreApplication
+
+        self.build_catalog_btn.setText("正在构建 Catalog...")
+        self.build_catalog_btn.setEnabled(False)
+        self.refresh_catalog_status_btn.setEnabled(False)
+        self.set_catalog_progress(3, "正在准备本地数据库...")
+
+        try:
+            from ..core.processing_catalog import QgisCatalogDB
+
+            db = QgisCatalogDB()
+
+            def processing_progress(current, total, message):
+                ratio = current / max(total, 1)
+                self.set_catalog_progress(8 + int(ratio * 67), message)
+
+            def expression_progress(current, total, message):
+                ratio = current / max(total, 1)
+                self.set_catalog_progress(76 + int(ratio * 18), message)
+
+            processing = db.rebuild_processing_catalog(progress_callback=processing_progress)
+            self.set_catalog_progress(76, "Processing catalog 已写入，正在扫描表达式函数...")
+            expression = db.rebuild_expression_catalog(progress_callback=expression_progress)
+            self.set_catalog_progress(96, "正在刷新 Catalog 状态...")
+            self.update_catalog_status()
+            self.catalog_progress.setValue(100)
+            QMessageBox.information(
+                self,
+                "Catalog 构建完成",
+                "本地 QGIS Catalog 已构建完成。\n\n"
+                f"Processing 算法：{processing.get('algorithm_count', 0)}\n"
+                f"Processing 参数：{processing.get('parameter_count', 0)}\n"
+                f"表达式函数：{expression.get('function_count', 0)}\n\n"
+                f"数据库：{processing.get('db_path', db.db_path)}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Catalog 构建失败", str(e))
+            self.catalog_status_label.setText(f"Catalog 状态：构建失败<br>{e}")
+            self.catalog_progress.setValue(0)
+        finally:
+            self.build_catalog_btn.setText("构建/刷新本地 Catalog")
+            self.build_catalog_btn.setEnabled(True)
+            self.refresh_catalog_status_btn.setEnabled(True)
+            QCoreApplication.processEvents()
         
     def reauthenticate_gee(self):
         from ..bridges.gee_bridge import GEEAuth
@@ -442,10 +640,17 @@ class SettingsDialog(QDialog):
         
         import requests
         try:
+            test_image_url = _build_glm_verify_image_data_url()
             payload = {
                 "model": self.glm_vision_combo.currentData(),
-                "messages": [{"role": "user", "content": "hi"}],
-                "max_tokens": 1
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "请用四个字以内描述这张测试图。"},
+                        {"type": "image_url", "image_url": {"url": test_image_url}}
+                    ]
+                }],
+                "max_tokens": 8
             }
             resp = requests.post(f"{url}/chat/completions", headers={"Authorization": f"Bearer {key}"}, json=payload, timeout=10)
             if resp.status_code == 200:

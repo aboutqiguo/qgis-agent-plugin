@@ -1,12 +1,12 @@
 [general]
 name=QGIS AI Agent
-qgisMinimumVersion=3.44
+qgisMinimumVersion=3.28
 qgisMaximumVersion=3.99
-description=An AI-powered GIS Agent using DeepSeek LLM for natural language geoprocessing and interaction.
-version=1.1.0
+description=An AI-powered GIS Agent using DeepSeek LLM and free Zhipu GLM vision models for natural language geoprocessing and visual assistance.
+version=1.3.2
 author=SevenLita
 email=user@example.com
 about=AI Copilot for QGIS.
-tracker=
-repository=
+tracker=https://github.com/aboutqiguo/qgis-agent-plugin/issues
+repository=https://github.com/aboutqiguo/qgis-agent-plugin
 category=Analysis

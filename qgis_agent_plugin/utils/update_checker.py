@@ -45,7 +45,6 @@ class UpdateChecker:
         import urllib.request
         import zipfile
         import tempfile
-        import shutil
         
         # fallback zip url (since user might name it differently, we will try the standard format)
         url = f"https://github.com/aboutqiguo/qgis-agent-plugin/releases/download/v{version}/qgis_agent_plugin_v{version}.zip"
@@ -54,10 +53,15 @@ class UpdateChecker:
             tmp_zip = os.path.join(tempfile.gettempdir(), f"qgis_agent_plugin_update_{version}.zip")
             urllib.request.urlretrieve(url, tmp_zip)
             
-            plugin_dir = os.path.dirname(__file__)
+            plugin_dir = os.path.dirname(os.path.dirname(__file__))
             plugins_root = os.path.dirname(plugin_dir)
             
             with zipfile.ZipFile(tmp_zip, 'r') as zip_ref:
+                names = zip_ref.namelist()
+                if any(os.path.isabs(n) or ".." in n.replace("\\", "/").split("/") for n in names):
+                    return False, "更新包包含不安全路径，已取消安装。"
+                if not any(n.replace("\\", "/") == "qgis_agent_plugin/metadata.txt" for n in names):
+                    return False, "更新包结构不正确：未找到 qgis_agent_plugin/metadata.txt。"
                 zip_ref.extractall(plugins_root)
                 
             os.remove(tmp_zip)

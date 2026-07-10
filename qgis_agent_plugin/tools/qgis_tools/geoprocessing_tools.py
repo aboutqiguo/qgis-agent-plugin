@@ -78,7 +78,7 @@ def clip(input_layer: QgsVectorLayer, overlay_layer: QgsVectorLayer, output_path
         
     return out_layer
 
-def clip_raster(input_layer, mask_layer, output_path: str = "TEMPORARY_OUTPUT"):
+def clip_raster(input_layer, mask_layer, output_path: str = "TEMPORARY_OUTPUT", validate_output: bool = True, min_valid_percent: float = 0.01):
     """
     Clips a raster layer using a vector mask layer.
     Strictly preserves data type, NoData values, and clones the visual renderer.
@@ -120,10 +120,20 @@ def clip_raster(input_layer, mask_layer, output_path: str = "TEMPORARY_OUTPUT"):
         
     result = processing.run("gdal:cliprasterbymasklayer", params)
     out_path = result['OUTPUT']
+
+    if validate_output and isinstance(out_path, str) and out_path != "TEMPORARY_OUTPUT":
+        from ...core.raster_validation import validate_raster_has_data
+        validation = validate_raster_has_data(out_path, min_valid_percent=min_valid_percent, force_read=True)
+        if not validation.get("ok"):
+            raise Exception(
+                "Raster clip output is not usable: "
+                f"{validation.get('message', 'validation failed')} "
+                f"({out_path})"
+            )
     
-    out_layer = QgsRasterLayer(out_path, f"{input_layer.name()}_clipped")
+    from .io_tools import load_raster_layer
+    out_layer = load_raster_layer(out_path, f"{input_layer.name()}_clipped")
     if out_layer.isValid():
-        QgsProject.instance().addMapLayer(out_layer)
         
         # Clone the renderer to perfectly preserve MinMax statistics and RGB mappings!
         if input_layer.renderer():

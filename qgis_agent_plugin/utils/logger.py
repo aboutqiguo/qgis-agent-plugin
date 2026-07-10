@@ -8,12 +8,13 @@ class QgsMessageLogHandler(logging.Handler):
         try:
             from qgis.core import QgsMessageLog, Qgis
             msg = self.format(record)
+            message_level = getattr(Qgis, "MessageLevel", Qgis)
             if record.levelno >= logging.ERROR:
-                level = Qgis.Critical
+                level = getattr(message_level, "Critical", getattr(Qgis, "Critical", None))
             elif record.levelno >= logging.WARNING:
-                level = Qgis.Warning
+                level = getattr(message_level, "Warning", getattr(Qgis, "Warning", None))
             else:
-                level = Qgis.Info
+                level = getattr(message_level, "Info", getattr(Qgis, "Info", None))
             QgsMessageLog.logMessage(msg, 'QGIS AI Agent', level)
         except Exception:
             pass

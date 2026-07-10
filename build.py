@@ -1,16 +1,23 @@
 import os
 import zipfile
-import shutil
 
 def build_plugin():
     # 配置选项
     plugin_dir = "qgis_agent_plugin"
-    output_zip = "qgis_agent_plugin_v1.1.0.zip"
+    output_zip = "qgis_agent_plugin_v1.3.2.zip"
     
     # 需要严格排除的文件和文件夹
-    exclude_dirs = {'__pycache__', '.git', 'test_data', 'tests', 'temp_images'}
-    exclude_files = {'.env', '.gitignore', 'build.py'}
-    exclude_exts = {'.pyc', '.pyo'}
+    exclude_dirs = {'__pycache__', '.git', '.idea', 'test_data', 'tests', 'temp_images', '.qgis_agent_runs'}
+    exclude_files = {
+        '.env',
+        '.gitignore',
+        'build.py',
+        'agent_run.log',
+        'token_usage.jsonl',
+        'qgis_processing_catalog.db',
+        'qgis_processing_catalog.sqlite',
+    }
+    exclude_exts = {'.pyc', '.pyo', '.log'}
 
     if not os.path.exists(plugin_dir):
         print(f"Error: Directory '{plugin_dir}' not found.")
