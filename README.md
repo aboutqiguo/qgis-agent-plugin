@@ -70,41 +70,6 @@ QGIS AI Agent Copilot 是一个面向 QGIS 的智能 GIS 助手插件。它将�
 python -m pip install openai earthengine-api requests
 ```
 
-#### macOS 环境
-
-打开 QGIS 的 Python 控制台（顶部菜单 `插件` -> `Python 控制台`），粘贴并执行以下代码来安装依赖。
-
-注：因 QGIS 线程设计，执行下载任务时 UI 可能会短暂卡死，耐心等待结束即可。
-
-```python
-import sys
-import runpy
-
-original_argv = sys.argv[:]
-sys.argv = [
-    "pip",
-    "install",
-    "--user",
-    "openai",
-    "earthengine-api",
-    "requests",
-    "-i",
-    "https://pypi.tuna.tsinghua.edu.cn/simple",
-]
-
-try:
-    print("正在直接从内存中唤醒 pip 模块进行安装，请稍候...")
-    runpy.run_module("pip", run_name="__main__")
-except SystemExit as e:
-    if e.code == 0:
-        print("🎉 所有依赖安装成功！请彻底重启 QGIS (Cmd + Q) 后使用。")
-    else:
-        print(f"安装结束，但可能存在警告，退出状态码：{e.code}")
-except Exception as e:
-    print(f"安装异常：{e}")
-finally:
-    sys.argv = original_argv
-```
 
 ### 从 ZIP 安装插件
 
