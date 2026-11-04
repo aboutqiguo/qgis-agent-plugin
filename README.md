@@ -6,7 +6,7 @@
 
 *An AI Copilot for QGIS: natural-language geoprocessing, remote sensing, OSM / GEE data acquisition and cartography.*
 
-[![Version](https://img.shields.io/badge/version-v1.4.0-blue.svg)](https://github.com/aboutqiguo/qgis-agent-plugin/releases)
+[![Version](https://img.shields.io/badge/version-v1.5.0-blue.svg)](https://github.com/aboutqiguo/qgis-agent-plugin/releases)
 [![QGIS](https://img.shields.io/badge/QGIS-3.28%20~%203.44-589632.svg?logo=qgis&logoColor=white)](https://qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
 [![LLM](https://img.shields.io/badge/LLM-DeepSeek%20V4-4D6BFE.svg)](https://platform.deepseek.com)
@@ -188,7 +188,7 @@ sequenceDiagram
 
 ### 2. 安装插件
 
-1. 从 [Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 下载 `qgis_agent_plugin_v1.4.0.zip`；
+1. 从 [Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 下载 `qgis_agent_plugin_v1.5.0.zip`；
 2. QGIS 菜单 `插件` → `管理并安装插件` → `从 ZIP 安装`；
 3. 选择 ZIP 文件安装并重启 QGIS；
 4. 工具栏点击 **QGIS AI Agent Copilot** 打开右侧对话面板。
@@ -351,6 +351,14 @@ QGIS 版本、插件版本、操作系统、任务提示词，以及插件目录
 
 ## 📈 更新日志
 
+### v1.5.0（2026-11）
+
+- **架构模块化重构**：按职责边界拆分三大核心文件（`tools.py` 拆分为 `tools` + `schemas` + `layer_and_processing_ops` + `osm_workflows` + `raster_and_project_ops`；`harness_thread.py` 拆分为主循环 + `harness_execution_helpers` + `harness_memory_and_artifacts` + `harness_progress`；`validators.py` 抽离声明式规则表 `validation_rules.py`），三大核心文件占比由 31.7% 降至 15.8%；
+- **健壮性与异常可观测性加固**：全仓裸 `except:` 与静默 `except Exception: pass` 100% 清零；关键路径（图层快照 `_snapshot_project_layers`、路径归一化 `_canonical_layer_source`、主线程信号槽、SQLite 记忆、检查点、校验器）收窄为精确异常元组并补齐 `exc_info=True` 堆栈日志；
+- **执行沙箱与扩展工具安全加固**：`code_execution_guard.py` 新增运行时受限 `__builtins__` 沙箱与高危模块/文件删除 AST 拦截；用户自定义扩展工具强制 `source_sha256` 完整性防篡改校验、AST 预检与 20 秒超时保护；
+- **真实 QGIS C++ 无头测试与 CI**：新增 `tests/test_qgis_real_smoke.py`（自动发现本机 QGIS 环境运行真实 C++ 层无头集成测试）、`tests/test_security_and_robustness.py` 与 `.github/workflows/ci.yml`（Python 3.10 / 3.12 自动化测试与打包流水线），测试用例增至 153 项；
+- **开源合规与元数据完善**：补齐根目录与插件内 `LICENSE`（MIT），移除未授权第三方参考仓库跟踪，完善 `metadata.txt` 与 `plugins.xml`。
+
 ### v1.4.0（2026-11）
 
 - **原生多模态**：视觉能力统一迁移到 DeepSeek 原生通道，移除第三方视觉平台依赖；
@@ -405,7 +413,7 @@ docs/                      图片与测试报告
 ```cmd
 pytest tests -q            # 运行测试
 python sync_dev.py         # 同步到本机 QGIS 插件目录（开发用）
-python build.py            # 打包 qgis_agent_plugin_v1.4.0.zip
+python build.py            # 打包 qgis_agent_plugin_v1.5.0.zip
 ```
 
 ---

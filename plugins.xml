@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugins>
-    <pyqgis_plugin name="QGIS AI Agent Copilot" version="1.4.0">
+    <pyqgis_plugin name="QGIS AI Agent Copilot" version="1.5.0">
         <description>An AI-powered GIS Agent using DeepSeek LLM with native multimodal vision for natural language geoprocessing, mapping, and spatial analysis.</description>
         <about>QGIS AI Agent Copilot is an in-application GIS Agent powered by DeepSeek LLM and native multimodal vision. It provides 64+ structured geoprocessing, remote sensing, machine learning segmentation, OpenStreetMap, and Google Earth Engine tools with fail-closed parameter validation, execution checkpoints, and project-scoped SQLite memory.</about>
-        <version>1.4.0</version>
+        <version>1.5.0</version>
         <qgis_minimum_version>3.28</qgis_minimum_version>
         <qgis_maximum_version>3.99</qgis_maximum_version>
         <homepage>https://github.com/aboutqiguo/qgis-agent-plugin</homepage>
-        <file_name>qgis_agent_plugin_v1.4.0.zip</file_name>
+        <file_name>qgis_agent_plugin_v1.5.0.zip</file_name>
         <author_name>SevenLita</author_name>
-        <download_url>https://github.com/aboutqiguo/qgis-agent-plugin/releases/download/v1.4.0/qgis_agent_plugin_v1.4.0.zip</download_url>
+        <download_url>https://github.com/aboutqiguo/qgis-agent-plugin/releases/download/v1.5.0/qgis_agent_plugin_v1.5.0.zip</download_url>
         <uploaded_by>SevenLita</uploaded_by>
         <create_date>2026-06-14T00:00:00</create_date>
         <update_date>2026-11-04T00:00:00</update_date>
