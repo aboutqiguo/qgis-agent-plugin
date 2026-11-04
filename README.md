@@ -57,20 +57,20 @@
 
 <table>
 <tr>
-<td width="50%" align="center"><b>OSM 交通路网获取、裁剪与分级渲染</b></td>
-<td width="50%" align="center"><b>DEM 填洼、流向与水文分析</b></td>
+<td width="50%" align="center"><b>四川成都龙泉驿区：DEM 与多光谱指数协同滑坡易发性智能评价</b></td>
+<td width="50%" align="center"><b>遥感影像机器学习分类与跨区域迁移解译推理</b></td>
 </tr>
 <tr>
-<td><img src="docs/images/demo_osm_transport.png" alt="OSM 交通路网"/></td>
-<td><img src="docs/images/demo_dem_hydrology.png" alt="DEM 水文分析"/></td>
+<td><img src="docs/images/demo_landslide_risk.png" alt="成都市龙泉驿区滑坡易发性智能评价"/></td>
+<td><img src="docs/images/demo_ml_segmentation.png" alt="机器学习遥感解译分割"/></td>
 </tr>
 <tr>
-<td align="center"><b>遥感影像掩膜叠加与水体 / 植被指数计算</b></td>
-<td align="center"><b>机器学习模型训练与跨区域迁移分割推理</b></td>
+<td align="center"><b>遥感影像掩膜叠加与水体 / 植被多光谱指数计算</b></td>
+<td align="center"><b>OSM 交通路网获取、拓扑裁剪与分级专题制图</b></td>
 </tr>
 <tr>
 <td><img src="docs/images/demo_mask_index.png" alt="遥感指数与掩膜"/></td>
-<td><img src="docs/images/demo_ml_segmentation.png" alt="机器学习遥感解译分割"/></td>
+<td><img src="docs/images/demo_osm_transport.png" alt="OSM 交通路网"/></td>
 </tr>
 </table>
 
@@ -82,7 +82,13 @@
 - **步骤 2（模型训练与精度评估）**：自主训练随机森林等分类器，输出整体精度（OA 0.9767）、交并比（IoU 0.9594）与重要特征权重视图；
 - **步骤 3（未知区域推理分割）**：加载目标未知区域遥感影像，批量生成概率分布栅格与分类图层，自动完成连通域滤波与面积统计报表，全过程自动沉淀验证报告。
 
-#### 场景 2：OSM 矢量数据一键获取与智能制图
+#### 场景 2：基于 DEM 地貌与多光谱指数的滑坡易发性评价与危险区识别
+> **「以四川成都市龙泉驿区为研究区，综合 DEM 地形起伏与 NDWI/NDVI 遥感指数，开展滑坡地质灾害易发性多级评价与高风险区自动矢量圈定」**
+- **多源因子提取**：Agent 自动由 DEM 提取坡度、坡向、地形起伏度（TRI）及地表水文特征，协同计算水体指数（NDWI）与植被指数（NDVI）作为环境抑制与敏感因子；
+- **综合易发性建模与五级划分**：加权综合计算连续易发性指数，按行业规范自动五级划分（极低 0-0.2、低 0.2-0.4、中 0.4-0.6、高 0.6-0.8、极高 >0.8），全区 558.63 km² 自动化空间划分；
+- **高风险核心斑块矢量提取与报表统计**：自动提取高与极高易发区斑块（提炼出 2043 个斑块，核心风险区 34.92 km²，最大单块 0.544 km²），自动统计高程区间（456-1040 m，均值 684 m）与平均坡度 30.5°，保存工程并生成结构化地灾排查建议报表。
+
+#### 场景 3：OSM 矢量数据一键获取与智能制图
 > **「获取这个区域的交通矢量数据」**
 - 读取工程 AOI 边界并换算 WGS84 范围，调用 OSM 下载道路 842 条、铁路 60 条（需 VPN）；
 - 重投影至 UTM 平面投影并裁剪，按等级符号化渲染，统计路网总长 410.9 km 与路网密度 1.02 km/km² 并保存工程。
@@ -241,6 +247,9 @@ finally:
 <div align="center">
   <img src="docs/images/ui_metro_progress.png" width="750" alt="任务里程碑进度"/>
   <p><sub>任务里程碑进度条：中文节点、自动折行、圆润轨道与节点状态实时渲染</sub></p>
+  <br/>
+  <img src="docs/images/ui_gee_progress.png" width="750" alt="GEE 云端遥感任务进度与状态实时追踪"/>
+  <p><sub>GEE 云端遥感任务进度：阶段推进、服务端状态（RUNNING）与实时耗时智能追踪</sub></p>
 </div>
 
 ### 设置窗口
