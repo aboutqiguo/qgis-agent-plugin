@@ -560,7 +560,7 @@ class SettingsDialog(QDialog):
         try:
             with open(user_md_path, "w", encoding="utf-8") as f:
                 f.write(self.global_memory_input.toPlainText())
-        except Exception:
+        except OSError:
             pass
             
         from qgis.core import QgsProject
@@ -570,7 +570,7 @@ class SettingsDialog(QDialog):
             try:
                 with open(memory_md_path, "w", encoding="utf-8") as f:
                     f.write(self.project_memory_input.toPlainText())
-            except Exception:
+            except OSError:
                 pass
         
         self.settings.remove("qgis_agent/gee_download_strategy")
@@ -606,14 +606,14 @@ class SettingsDialog(QDialog):
                     cur.execute("SELECT value FROM catalog_meta WHERE key = ?", (key,))
                     row = cur.fetchone()
                     return row[0] if row else ""
-                except Exception:
+                except sqlite3.Error:
                     return ""
 
             def table_count(name):
                 try:
                     cur.execute(f"SELECT COUNT(*) FROM {name}")
                     return int(cur.fetchone()[0])
-                except Exception:
+                except (sqlite3.Error, TypeError, ValueError):
                     return 0
 
             processing_built_at = meta_value("processing_built_at") or "未知"

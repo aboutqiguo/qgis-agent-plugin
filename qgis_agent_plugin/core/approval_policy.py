@@ -231,7 +231,7 @@ class ToolApprovalPolicy:
             temp_dir = os.path.abspath(tempfile.gettempdir()).lower()
             if os.path.commonpath([abs_target, temp_dir]) == temp_dir:
                 return True
-        except Exception:
+        except (OSError, ValueError, TypeError):
             pass
         return False
 

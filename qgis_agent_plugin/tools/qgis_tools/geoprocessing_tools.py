@@ -110,7 +110,7 @@ def clip(input_layer: QgsVectorLayer, overlay_layer: QgsVectorLayer, output_path
             out_layer.setName(f"{input_layer.name()}_clipped")
             if hasattr(QgsProject.instance(), "addMapLayer"):
                 QgsProject.instance().addMapLayer(out_layer)
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         pass
         
     return out_layer

@@ -10,7 +10,7 @@ class SqliteMemoryDB:
         
     def _get_db_path(self):
         home = QgsProject.instance().homePath()
-        if not home:
+        if not isinstance(home, str) or not home.strip() or "MagicMock" in home:
             return None
         return os.path.join(home, "qgis_agent_memory.db")
         
@@ -49,7 +49,7 @@ class SqliteMemoryDB:
                     END;
                 ''')
                 self.has_fts = True
-            except Exception as e:
+            except sqlite3.Error as e:
                 import logging
                 logging.warning(f"SQLite FTS5 is not available: {e}. Falling back to standard LIKE queries.")
                 self.has_fts = False
@@ -66,7 +66,7 @@ class SqliteMemoryDB:
         if getattr(self, 'has_fts', False):
             try:
                 cursor.execute("DELETE FROM messages_fts")
-            except Exception:
+            except sqlite3.Error:
                 pass
         
         for msg in messages_list:
@@ -97,7 +97,7 @@ class SqliteMemoryDB:
                 else:
                     # Fallback for old database format
                     messages.append({"role": role, "content": content})
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
                 messages.append({"role": role, "content": content})
                 
         # --- Sanitize corrupted history from old plugin versions ---
@@ -157,5 +157,5 @@ class SqliteMemoryDB:
                 trunc = content[:1000] + "..." if len(content) > 1000 else content
                 out.append(f"[{role}]: {trunc}")
             return "\n\n".join(out)
-        except Exception as e:
+        except (sqlite3.Error, TypeError, ValueError) as e:
             return f"Error searching memory: {str(e)}"

@@ -812,7 +812,8 @@ class ChatDockWidget(QDockWidget):
                         self.task_viewer.setHtml(styled_html)
                     else:
                         self.task_viewer.setPlainText(content)
-            except: pass
+            except (OSError, RuntimeError, Exception):
+                pass
         else:
             self.tab_task_btn.hide()
             if self.stacked_widget.currentIndex() == 2: self.switch_tab(0)

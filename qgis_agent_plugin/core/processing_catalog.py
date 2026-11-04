@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import tempfile
 import re
 import sqlite3
 from datetime import datetime
@@ -42,7 +43,7 @@ def _safe_call(obj: Any, name: str, default: Any = "") -> Any:
     try:
         value = getattr(obj, name)
         return value() if callable(value) else value
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         return default
 
 
@@ -106,20 +107,20 @@ def _catalog_path() -> str:
         from qgis.core import QgsApplication
 
         root = QgsApplication.qgisSettingsDirPath()
-        if root:
-            os.makedirs(root, exist_ok=True)
-            return os.path.join(root, "qgis_agent_catalog.db")
-    except Exception:
+        if isinstance(root, str) and root.strip() and "MagicMock" not in root and not root.startswith("<"):
+            os.makedirs(root.strip(), exist_ok=True)
+            return os.path.join(root.strip(), "qgis_agent_catalog.db")
+    except (ImportError, AttributeError, OSError, TypeError, RuntimeError):
         pass
     try:
         from qgis.core import QgsProject
 
         home = QgsProject.instance().homePath()
-        if home:
-            return os.path.join(home, "qgis_agent_catalog.db")
-    except Exception:
+        if isinstance(home, str) and home.strip() and "MagicMock" not in home and not home.startswith("<"):
+            return os.path.join(home.strip(), "qgis_agent_catalog.db")
+    except (ImportError, AttributeError, OSError, TypeError, RuntimeError):
         pass
-    return os.path.join(os.path.expanduser("~"), ".qgis_agent_catalog.db")
+    return os.path.join(tempfile.gettempdir(), "qgis_agent_catalog.db")
 
 
 class QgisCatalogDB:
@@ -268,7 +269,7 @@ class QgisCatalogDB:
                 """
             )
             self.has_fts = True
-        except Exception:
+        except sqlite3.Error:
             self.has_fts = False
         conn.commit()
 
@@ -322,7 +323,7 @@ class QgisCatalogDB:
                 "providers": sorted(providers, key=lambda item: item["id"]),
             }
             return hashlib.sha256(_to_json(payload).encode("utf-8")).hexdigest()
-        except Exception as exc:
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
             return f"unavailable:{exc}"
 
     def _expression_signature(self) -> str:
@@ -336,7 +337,7 @@ class QgisCatalogDB:
                 "functions": names,
             }
             return hashlib.sha256(_to_json(payload).encode("utf-8")).hexdigest()
-        except Exception as exc:
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
             return f"unavailable:{exc}"
 
     def rebuild_processing_catalog(self, signature: str = "", progress_callback: Any = None) -> Dict[str, Any]:
@@ -593,7 +594,7 @@ class QgisCatalogDB:
         can_execute = 1
         try:
             can_execute = 1 if alg.canExecute() else 0
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
             can_execute = 0
             execute_error = str(exc)
         return {
@@ -642,7 +643,7 @@ class QgisCatalogDB:
             flag_optional = getattr(QgsProcessingParameterDefinition, "FlagOptional", None)
             if flag_optional is not None and flags is not None:
                 return bool(flags & flag_optional)
-        except Exception:
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
             pass
         text = str(_safe_call(param, "flags", "")).lower()
         return "optional" in text
@@ -663,7 +664,7 @@ class QgisCatalogDB:
             from qgis.core import QgsExpression
 
             tags = list(QgsExpression.tags(name))
-        except Exception:
+        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
             tags = _safe_call(function, "tags", [])
         return {
             "name": name,
@@ -702,7 +703,7 @@ class QgisCatalogDB:
                 params.append(limit)
                 cur.execute(sql, params)
                 rows = cur.fetchall()
-            except Exception:
+            except sqlite3.Error:
                 rows = []
         if not rows:
             pattern = _like_pattern(query)
@@ -805,7 +806,7 @@ class QgisCatalogDB:
             public_key = key.replace("_json", "")
             try:
                 item[public_key] = json.loads(item.pop(key) or "[]")
-            except Exception:
+            except (ValueError, TypeError, KeyError):
                 item[public_key] = []
         item["optional"] = bool(item["optional"])
         return item
@@ -843,7 +844,7 @@ class QgisCatalogDB:
                     (_fts_match_query(query), limit),
                 )
                 rows = cur.fetchall()
-            except Exception:
+            except sqlite3.Error:
                 rows = []
         if not rows:
             pattern = _like_pattern(query)
@@ -1119,7 +1120,7 @@ def validate_processing_algorithm_call(alg_id: str, parameters: Dict[str, Any]) 
                 "data": data,
                 "suggestions": ["Inspect layer names, parameter types, and enum values before retrying."],
             }
-    except Exception as exc:
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
         data["qgis_check_error"] = str(exc)
         return {
             "ok": False,

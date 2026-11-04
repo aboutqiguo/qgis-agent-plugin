@@ -77,7 +77,7 @@ class QGISAIAgentPlugin:
             QgsProject.instance().readProject.disconnect(self.on_project_loaded)
             QgsProject.instance().cleared.disconnect(self.on_project_cleared)
             QgsProject.instance().projectSaved.disconnect(self.on_project_saved)
-        except Exception:
+        except (ImportError, TypeError, RuntimeError, AttributeError):
             pass
 
     def run(self):
@@ -226,102 +226,38 @@ class QGISAIAgentPlugin:
             ),
         )
 
+    @staticmethod
+    def _prune_temp_images(temp_dir, max_files=20):
+        try:
+            entries = [
+                os.path.join(temp_dir, fn)
+                for fn in os.listdir(temp_dir)
+                if fn.startswith("qgis_window_") and fn.lower().endswith(".png")
+            ]
+            if len(entries) <= max_files:
+                return
+            entries.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            for stale_path in entries[max_files:]:
+                try:
+                    os.remove(stale_path)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
     def handle_atomic_tool(self, name, kwargs):
         progress_callback = None
         cancel_callback = None
         operation_id = ""
         is_acquisition = False
+        result = "Error: Atomic tool execution did not complete."
         try:
-            from .core.progress import DATA_ACQUISITION_TOOLS, emit_progress
-            is_acquisition = name in DATA_ACQUISITION_TOOLS
-            if is_acquisition:
-                operation_id = f"{name}:{time.monotonic_ns()}"
-                titles = {
-                    "download_osm_data": "OSM 数据下载",
-                    "download_osm_boundary": "OSM 行政边界下载",
-                    "download_osm_roads": "OSM 路网下载",
-                    "download_osm_features": "OSM 要素下载",
-                    "run_osm_acquisition_workflow": "连续 OSM 数据获取",
-                    "run_gee_sentinel2_download_workflow": "GEE Sentinel-2 数据获取",
-                    "run_gee_dem_download_workflow": "GEE DEM 数据获取",
-                }
-                title = titles.get(name, "数据获取")
-                last_log = {"signature": None, "time": 0.0}
-
-                def _publish_progress(event):
-                    payload = dict(event or {})
-                    payload["operation_id"] = operation_id
-                    if self.dockwidget:
-                        self.dockwidget.operation_progress_signal.emit(payload)
-                    signature = (
-                        payload.get("state"),
-                        payload.get("stage_index"),
-                        payload.get("stage"),
-                        int(float(payload.get("percent") or 0) // 10),
-                    )
-                    now = time.monotonic()
-                    if signature != last_log["signature"] or now - last_log["time"] >= 10.0:
-                        self.logger.info(
-                            "Acquisition progress: tool=%s state=%s stage=%s/%s %s percent=%s detail=%s",
-                            name,
-                            payload.get("state", "running"),
-                            payload.get("stage_index", 1),
-                            payload.get("stage_count", 1),
-                            payload.get("stage", ""),
-                            payload.get("percent"),
-                            payload.get("detail", ""),
-                        )
-                        last_log["signature"] = signature
-                        last_log["time"] = now
-
-                progress_callback = _publish_progress
-                cancel_callback = lambda: bool(self.harness_thread and self.harness_thread.is_killed)
-                emit_progress(
-                    progress_callback,
-                    tool_name=name,
-                    title=title,
-                    stage="准备参数",
-                    stage_index=1,
-                    stage_count=1,
-                    stage_percent=0,
-                    detail="正在启动数据获取工具。",
-                )
-
-            if name == "take_qgis_window_snapshot":
-                import os, uuid
-                window = self.iface.mainWindow()
-                pixmap = window.grab()
-                temp_dir = os.path.join(self.plugin_dir, "temp_images")
-                if not os.path.exists(temp_dir):
-                    os.makedirs(temp_dir)
-                img_path = os.path.join(temp_dir, f"qgis_window_{uuid.uuid4().hex[:8]}.png")
-                pixmap.save(img_path)
-                result = f"[IMAGE_PATH]{img_path}"
-            else:
-                from .tools.tools import execute_atomic_tool_structured
-                result = execute_atomic_tool_structured(
-                    self.iface,
-                    name,
-                    kwargs,
-                    progress_callback=progress_callback,
-                    cancel_callback=cancel_callback,
-                )
-        except Exception as e:
-            result = f"Error: {str(e)}"
-
-        if is_acquisition and progress_callback:
             try:
-                from .core.progress import emit_progress
-                from .core.tool_result import parse_tool_result_payload
-                result_payload = parse_tool_result_payload(result) or {}
-                result_ok = bool(result_payload.get("ok"))
-                error_type = str(result_payload.get("error_type") or "")
-                state = "completed" if result_ok else "cancelled" if error_type == "operation_cancelled" else "failed"
-                message = result_payload.get("message", str(result))
-                emit_progress(
-                    progress_callback,
-                    tool_name=name,
-                    title={
+                from .core.progress import DATA_ACQUISITION_TOOLS, emit_progress
+                is_acquisition = name in DATA_ACQUISITION_TOOLS
+                if is_acquisition:
+                    operation_id = f"{name}:{time.monotonic_ns()}"
+                    titles = {
                         "download_osm_data": "OSM 数据下载",
                         "download_osm_boundary": "OSM 行政边界下载",
                         "download_osm_roads": "OSM 路网下载",
@@ -329,62 +265,150 @@ class QGISAIAgentPlugin:
                         "run_osm_acquisition_workflow": "连续 OSM 数据获取",
                         "run_gee_sentinel2_download_workflow": "GEE Sentinel-2 数据获取",
                         "run_gee_dem_download_workflow": "GEE DEM 数据获取",
-                    }.get(name, "数据获取"),
-                    stage="完成" if result_ok else "已取消" if state == "cancelled" else "失败",
-                    stage_index=1,
-                    stage_count=1,
-                    stage_percent=100 if result_ok else 0,
-                    detail=str(message)[:240],
-                    state=state,
-                )
-            except Exception:
-                pass
-            
-        if self.harness_thread:
-            self.harness_thread.atomic_tool_response = result
-            self.harness_thread.atomic_tool_event.set()
+                    }
+                    title = titles.get(name, "数据获取")
+                    last_log = {"signature": None, "time": 0.0}
+
+                    def _publish_progress(event):
+                        payload = dict(event or {})
+                        payload["operation_id"] = operation_id
+                        if self.dockwidget:
+                            self.dockwidget.operation_progress_signal.emit(payload)
+                        signature = (
+                            payload.get("state"),
+                            payload.get("stage_index"),
+                            payload.get("stage"),
+                            int(float(payload.get("percent") or 0) // 10),
+                        )
+                        now = time.monotonic()
+                        if signature != last_log["signature"] or now - last_log["time"] >= 10.0:
+                            self.logger.info(
+                                "Acquisition progress: tool=%s state=%s stage=%s/%s %s percent=%s detail=%s",
+                                name,
+                                payload.get("state", "running"),
+                                payload.get("stage_index", 1),
+                                payload.get("stage_count", 1),
+                                payload.get("stage", ""),
+                                payload.get("percent"),
+                                payload.get("detail", ""),
+                            )
+                            last_log["signature"] = signature
+                            last_log["time"] = now
+
+                    progress_callback = _publish_progress
+                    cancel_callback = lambda: bool(self.harness_thread and self.harness_thread.is_killed)
+                    emit_progress(
+                        progress_callback,
+                        tool_name=name,
+                        title=title,
+                        stage="准备参数",
+                        stage_index=1,
+                        stage_count=1,
+                        stage_percent=0,
+                        detail="正在启动数据获取工具。",
+                    )
+
+                if name == "take_qgis_window_snapshot":
+                    import os, uuid
+                    window = self.iface.mainWindow()
+                    pixmap = window.grab()
+                    temp_dir = os.path.join(self.plugin_dir, "temp_images")
+                    os.makedirs(temp_dir, exist_ok=True)
+                    self._prune_temp_images(temp_dir, max_files=19)
+                    img_path = os.path.join(temp_dir, f"qgis_window_{uuid.uuid4().hex[:8]}.png")
+                    pixmap.save(img_path)
+                    result = f"[IMAGE_PATH]{img_path}"
+                else:
+                    from .tools.tools import execute_atomic_tool_structured
+                    result = execute_atomic_tool_structured(
+                        self.iface,
+                        name,
+                        kwargs,
+                        progress_callback=progress_callback,
+                        cancel_callback=cancel_callback,
+                    )
+            except Exception as e:
+                self.logger.error("Atomic tool %s failed on main thread: %s", name, e, exc_info=True)
+                result = f"Error: {str(e)}"
+
+            if is_acquisition and progress_callback:
+                try:
+                    from .core.progress import emit_progress
+                    from .core.tool_result import parse_tool_result_payload
+                    result_payload = parse_tool_result_payload(result) or {}
+                    result_ok = bool(result_payload.get("ok"))
+                    error_type = str(result_payload.get("error_type") or "")
+                    state = "completed" if result_ok else "cancelled" if error_type == "operation_cancelled" else "failed"
+                    message = result_payload.get("message", str(result))
+                    emit_progress(
+                        progress_callback,
+                        tool_name=name,
+                        title={
+                            "download_osm_data": "OSM 数据下载",
+                            "download_osm_boundary": "OSM 行政边界下载",
+                            "download_osm_roads": "OSM 路网下载",
+                            "download_osm_features": "OSM 要素下载",
+                            "run_osm_acquisition_workflow": "连续 OSM 数据获取",
+                            "run_gee_sentinel2_download_workflow": "GEE Sentinel-2 数据获取",
+                            "run_gee_dem_download_workflow": "GEE DEM 数据获取",
+                        }.get(name, "数据获取"),
+                        stage="完成" if result_ok else "已取消" if state == "cancelled" else "失败",
+                        stage_index=1,
+                        stage_count=1,
+                        stage_percent=100 if result_ok else 0,
+                        detail=str(message)[:240],
+                        state=state,
+                    )
+                except Exception as e:
+                    self.logger.debug("Failed to emit final acquisition progress for %s: %s", name, e, exc_info=True)
+        finally:
+            if self.harness_thread:
+                self.harness_thread.atomic_tool_response = result
+                self.harness_thread.atomic_tool_event.set()
 
     def handle_canvas_image(self):
+        img_path = ""
         try:
             import tempfile
-            img_path = os.path.join(tempfile.gettempdir(), "qgis_canvas_snap.png")
-            self.iface.mapCanvas().saveAsImage(img_path)
+            candidate_path = os.path.join(tempfile.gettempdir(), "qgis_canvas_snap.png")
+            self.iface.mapCanvas().saveAsImage(candidate_path)
+            img_path = candidate_path
+        except Exception as e:
+            self.logger.error("Error saving canvas: %s", e, exc_info=True)
+        finally:
             if self.harness_thread:
                 self.harness_thread.canvas_image_path = img_path
                 self.harness_thread.canvas_image_event.set()
-        except Exception as e:
-            self.logger.error(f"Error saving canvas: {e}")
-            if self.harness_thread:
-                self.harness_thread.canvas_image_path = ""
-                self.harness_thread.canvas_image_event.set()
 
     def handle_ask_human(self, question):
+        answer = "GUI Error: ask_human did not complete"
         try:
             answer = self.dockwidget.ask_human(question)
         except Exception as e:
-            self.logger.error(f"GUI Crash in ask_human: {e}")
+            self.logger.error("GUI Crash in ask_human: %s", e, exc_info=True)
             answer = "GUI Error: " + str(e)
-            
-        if self.harness_thread:
-            self.harness_thread.human_input_response = answer
-            self.harness_thread.human_input_event.set()
+        finally:
+            if self.harness_thread:
+                self.harness_thread.human_input_response = answer
+                self.harness_thread.human_input_event.set()
             
     def handle_destructive_auth(self, code):
+        auth = False
         try:
             auth = self.dockwidget.ask_destructive_confirmation(code)
         except Exception as e:
-            self.logger.error(f"GUI Crash in ask_destructive_confirmation: {e}")
-            auth = False # Fail safe
-            
-        if self.harness_thread:
-            self.harness_thread.destructive_auth_response = auth
-            self.harness_thread.destructive_auth_event.set()
+            self.logger.error("GUI Crash in ask_destructive_confirmation: %s", e, exc_info=True)
+            auth = False
+        finally:
+            if self.harness_thread:
+                self.harness_thread.destructive_auth_response = auth
+                self.harness_thread.destructive_auth_event.set()
 
     def handle_request_plan_approval(self):
         try:
             self.dockwidget.show_action_panel()
         except Exception as e:
-            self.logger.error(f"GUI Crash in show_action_panel: {e}")
+            self.logger.error("GUI Crash in show_action_panel: %s", e, exc_info=True)
             if self.harness_thread:
                 self.harness_thread.plan_approval_response = "REJECT"
                 self.harness_thread.plan_approval_event.set()
@@ -400,11 +424,20 @@ class QGISAIAgentPlugin:
         source = str(source).strip().strip('"')
         head, sep, tail = source.partition("|")
         normalized_head = head.replace("\\", "/")
-        try:
-            if os.path.isabs(head) or os.path.exists(head):
-                normalized_head = os.path.normcase(os.path.abspath(head)).replace("\\", "/")
-        except Exception:
-            pass
+        lowered = normalized_head.lower()
+        is_uri_or_service = (
+            lowered.startswith(("http://", "https://", "memory:", "postgres:", "wms:", "wfs:", "crs=", "url=", "type="))
+            or "://" in lowered
+        )
+        if not is_uri_or_service:
+            try:
+                if os.path.isabs(head) or os.path.exists(head):
+                    normalized_head = os.path.normcase(os.path.abspath(head)).replace("\\", "/")
+                else:
+                    normalized_head = os.path.normcase(os.path.normpath(head)).replace("\\", "/")
+            except (OSError, ValueError) as e:
+                if hasattr(self, "logger") and self.logger:
+                    self.logger.debug("Failed to canonicalize layer source %r: %s", source, e)
         return f"{normalized_head}{sep}{tail}"
 
     def _snapshot_project_layers(self):
@@ -420,23 +453,31 @@ class QGISAIAgentPlugin:
                     layer_type = "other"
                 try:
                     source = self._canonical_layer_source(layer.source())
-                except Exception:
+                except (AttributeError, RuntimeError, TypeError, ValueError) as e:
+                    self.logger.debug("Failed to read source for layer %s: %s", layer_id, e)
                     source = ""
                 try:
                     name = layer.name()
-                except Exception:
+                except (AttributeError, RuntimeError, TypeError) as e:
+                    self.logger.debug("Failed to read name for layer %s: %s", layer_id, e)
                     name = layer_id
                 snapshot[layer_id] = {"id": layer_id, "name": name, "source": source, "type": layer_type}
             return snapshot
-        except Exception as e:
-            self.logger.warning(f"Failed to snapshot project layers: {e}")
-            return {}
+        except (ImportError, AttributeError, RuntimeError, TypeError) as e:
+            self.logger.warning("Failed to snapshot project layers: %s", e, exc_info=True)
+            return None
 
     def _cleanup_new_duplicate_layers(self, before_snapshot):
+        if before_snapshot is None:
+            self.logger.warning("Skipping duplicate layer cleanup because pre-execution layer snapshot failed.")
+            return []
         try:
             from qgis.core import QgsProject
             project = QgsProject.instance()
             after_snapshot = self._snapshot_project_layers()
+            if after_snapshot is None:
+                self.logger.warning("Skipping duplicate layer cleanup because post-execution layer snapshot failed.")
+                return []
             groups = {}
             for layer_id, info in after_snapshot.items():
                 source = info.get("source", "")
@@ -459,19 +500,23 @@ class QGISAIAgentPlugin:
                     try:
                         project.removeMapLayer(layer_id)
                         removed.append(f"{info.get('name', layer_id)} -> {source}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to remove duplicate layer {layer_id}: {e}")
+                    except (AttributeError, RuntimeError, TypeError) as e:
+                        self.logger.warning("Failed to remove duplicate layer %s: %s", layer_id, e, exc_info=True)
             if removed:
-                self.logger.info(f"Removed duplicate layers added by script: {removed}")
+                self.logger.info("Removed duplicate layers added by script: %s", removed)
             return removed
-        except Exception as e:
-            self.logger.warning(f"Failed to clean duplicate layers: {e}")
+        except (ImportError, AttributeError, RuntimeError, TypeError) as e:
+            self.logger.warning("Failed to clean duplicate layers: %s", e, exc_info=True)
             return []
 
     def _format_layer_delta(self, before_snapshot, after_snapshot, removed_duplicates=None):
         removed_duplicates = removed_duplicates or []
-        added = [info for layer_id, info in after_snapshot.items() if layer_id not in before_snapshot]
-        removed = [info for layer_id, info in before_snapshot.items() if layer_id not in after_snapshot]
+        if before_snapshot is None or after_snapshot is None:
+            added = []
+            removed = []
+        else:
+            added = [info for layer_id, info in after_snapshot.items() if layer_id not in before_snapshot]
+            removed = [info for layer_id, info in before_snapshot.items() if layer_id not in after_snapshot]
         lines = []
         if added:
             lines.append("Added layers:")
@@ -495,131 +540,132 @@ class QGISAIAgentPlugin:
         from contextlib import redirect_stdout
         from qgis.utils import iface
         from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry
-        
-        tools_path = self.plugin_dir
-        if tools_path not in sys.path:
-            sys.path.append(tools_path)
-            
-        env_dict = globals().copy()
-        env_dict['iface'] = iface
-        env_dict['QgsProject'] = QgsProject
-        env_dict['QgsVectorLayer'] = QgsVectorLayer
-        env_dict['QgsRasterLayer'] = QgsRasterLayer
-        env_dict['QgsFeature'] = QgsFeature
-        env_dict['QgsGeometry'] = QgsGeometry
-        
-        try:
-            from qgis.core import QgsProcessingFeedback, Qgis, QgsApplication, QgsRasterBandStats
-            from qgis.PyQt.QtCore import QCoreApplication
-            class PrintFeedback(QgsProcessingFeedback):
-                def setProgress(self, progress):
-                    super().setProgress(progress)
-                    QCoreApplication.processEvents()
-                def reportError(self, error, fatalError=False):
-                    print(f"QGIS ERROR: {error}")
-                    QCoreApplication.processEvents()
-                def pushInfo(self, info):
-                    print(f"QGIS INFO: {info}")
-                    QCoreApplication.processEvents()
-                def pushCommandInfo(self, info):
-                    print(f"QGIS CMD: {info}")
-                def pushDebugInfo(self, info):
-                    print(f"QGIS DEBUG: {info}")
-                def pushConsoleInfo(self, info):
-                    print(f"QGIS CONSOLE: {info}")
-            env_dict['PrintFeedback'] = PrintFeedback
-            env_dict['Qgis'] = Qgis
-            env_dict['QgsApplication'] = QgsApplication
-            env_dict['QgsProcessingFeedback'] = QgsProcessingFeedback
-            env_dict['QgsRasterBandStats'] = QgsRasterBandStats
-            env_dict['QCoreApplication'] = QCoreApplication
-            
-            # Setup global message log interceptor for async warnings (e.g. WMS tile failures)
-            captured_logs = []
-            message_level = getattr(Qgis, "MessageLevel", Qgis)
-            warning_level = getattr(message_level, "Warning", getattr(Qgis, "Warning", None))
-            critical_level = getattr(message_level, "Critical", getattr(Qgis, "Critical", None))
-            def log_interceptor(msg, tag, level):
-                if level in (warning_level, critical_level):
-                    # Filter out benign warnings if necessary, but capture most
-                    captured_logs.append(f"[{tag}] {msg}")
-            
-            QgsApplication.messageLog().messageReceived.connect(log_interceptor)
-            
-        except ImportError:
-            pass
-        
-        f = io.StringIO()
-        layer_snapshot_before = self._snapshot_project_layers()
-        try:
-            from qgis.PyQt.QtWidgets import QApplication
-            from qgis.PyQt.QtCore import Qt
-            from .core.code_execution_guard import execute_main_thread_code
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                with redirect_stdout(f):
-                    execute_main_thread_code(
-                        code,
-                        env_dict,
-                        cancel_callback=lambda: bool(self.harness_thread and self.harness_thread.is_killed),
-                    )
-            finally:
-                QApplication.restoreOverrideCursor()
-                
-            stdout_str = f.getvalue().strip()
-            
-            if captured_logs:
-                sys_logs = "\nQGIS System Warnings:\n" + "\n".join(captured_logs)
-            else:
-                sys_logs = ""
-                
-            if stdout_str:
-                output = f"Code executed successfully.\nStandard Output:\n{stdout_str}{sys_logs}"
-            else:
-                output = f"Code executed successfully.{sys_logs}"
-                
-        except Exception:
-            stdout_str = f.getvalue().strip()
-            tb = traceback.format_exc()
-            if stdout_str:
-                output = f"[EXECUTION_FAILED_TRACEBACK]\n{tb}\nStandard Output before error:\n{stdout_str}"
-            else:
-                output = f"[EXECUTION_FAILED_TRACEBACK]\n{tb}"
-                
-            if "ee." in tb:
-                try:
-                    import re
-                    from .tools.tools import execute_atomic_tool
-                    matches = re.findall(r'ee\.[a-zA-Z0-9_\.]+', tb)
-                    if matches:
-                        # Find the most specific API mentioned
-                        best_match = sorted(matches, key=len, reverse=True)[0]
-                        search_term = best_match.split('.')[-1]
-                        fallback_info = execute_atomic_tool(self.iface, "search_gee_api", {"query": search_term})
-                        if not fallback_info.startswith("No API found") and not fallback_info.startswith("Error") and not fallback_info.startswith("Failed"):
-                            output += f"\n\n[GEE API FALLBACK (AUTO-RETRIEVED)]\nIt looks like a GEE API call failed. Here is the official signature for `{best_match}` (and related) to help you fix it:\n\n{fallback_info}"
-                except Exception:
-                    pass
-        finally:
-            # Always disconnect the interceptor
-            try:
-                from qgis.core import QgsApplication
-                QgsApplication.messageLog().messageReceived.disconnect(log_interceptor)
-            except:
-                pass
 
+        output = "[EXECUTION_FAILED_TRACEBACK]\nMain-thread code execution did not complete."
+        captured_logs = []
+        log_interceptor = None
         try:
-            removed_duplicates = self._cleanup_new_duplicate_layers(layer_snapshot_before)
-            layer_snapshot_after = self._snapshot_project_layers()
-            layer_delta = self._format_layer_delta(layer_snapshot_before, layer_snapshot_after, removed_duplicates)
-            if layer_delta:
-                output += "\n\n[PROJECT LAYER CHANGES]\n" + layer_delta
-        except Exception as e:
-            self.logger.warning(f"Failed to append layer change summary: {e}")
+            tools_path = self.plugin_dir
+            if tools_path not in sys.path:
+                sys.path.append(tools_path)
+                
+            env_dict = globals().copy()
+            env_dict['iface'] = iface
+            env_dict['QgsProject'] = QgsProject
+            env_dict['QgsVectorLayer'] = QgsVectorLayer
+            env_dict['QgsRasterLayer'] = QgsRasterLayer
+            env_dict['QgsFeature'] = QgsFeature
+            env_dict['QgsGeometry'] = QgsGeometry
             
-        if self.harness_thread:
-            self.harness_thread.code_exec_response = output
-            self.harness_thread.code_exec_event.set()
+            try:
+                from qgis.core import QgsProcessingFeedback, Qgis, QgsApplication, QgsRasterBandStats
+                from qgis.PyQt.QtCore import QCoreApplication
+                class PrintFeedback(QgsProcessingFeedback):
+                    def setProgress(self, progress):
+                        super().setProgress(progress)
+                        QCoreApplication.processEvents()
+                    def reportError(self, error, fatalError=False):
+                        print(f"QGIS ERROR: {error}")
+                        QCoreApplication.processEvents()
+                    def pushInfo(self, info):
+                        print(f"QGIS INFO: {info}")
+                        QCoreApplication.processEvents()
+                    def pushCommandInfo(self, info):
+                        print(f"QGIS CMD: {info}")
+                    def pushDebugInfo(self, info):
+                        print(f"QGIS DEBUG: {info}")
+                    def pushConsoleInfo(self, info):
+                        print(f"QGIS CONSOLE: {info}")
+                env_dict['PrintFeedback'] = PrintFeedback
+                env_dict['Qgis'] = Qgis
+                env_dict['QgsApplication'] = QgsApplication
+                env_dict['QgsProcessingFeedback'] = QgsProcessingFeedback
+                env_dict['QgsRasterBandStats'] = QgsRasterBandStats
+                env_dict['QCoreApplication'] = QCoreApplication
+                
+                # Setup global message log interceptor for async warnings (e.g. WMS tile failures)
+                message_level = getattr(Qgis, "MessageLevel", Qgis)
+                warning_level = getattr(message_level, "Warning", getattr(Qgis, "Warning", None))
+                critical_level = getattr(message_level, "Critical", getattr(Qgis, "Critical", None))
+                def _interceptor(msg, tag, level):
+                    if level in (warning_level, critical_level):
+                        captured_logs.append(f"[{tag}] {msg}")
+                log_interceptor = _interceptor
+                QgsApplication.messageLog().messageReceived.connect(log_interceptor)
+            except ImportError as e:
+                self.logger.debug("Optional QGIS classes unavailable for code execution interceptor: %s", e)
+            
+            f = io.StringIO()
+            layer_snapshot_before = self._snapshot_project_layers()
+            try:
+                from qgis.PyQt.QtWidgets import QApplication
+                from qgis.PyQt.QtCore import Qt
+                from .core.code_execution_guard import execute_main_thread_code
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                try:
+                    with redirect_stdout(f):
+                        execute_main_thread_code(
+                            code,
+                            env_dict,
+                            cancel_callback=lambda: bool(self.harness_thread and self.harness_thread.is_killed),
+                        )
+                finally:
+                    QApplication.restoreOverrideCursor()
+                    
+                stdout_str = f.getvalue().strip()
+                
+                if captured_logs:
+                    sys_logs = "\nQGIS System Warnings:\n" + "\n".join(captured_logs)
+                else:
+                    sys_logs = ""
+                    
+                if stdout_str:
+                    output = f"Code executed successfully.\nStandard Output:\n{stdout_str}{sys_logs}"
+                else:
+                    output = f"Code executed successfully.{sys_logs}"
+                    
+            except Exception:
+                stdout_str = f.getvalue().strip()
+                tb = traceback.format_exc()
+                self.logger.warning("Main-thread PyQGIS execution failed:\n%s", tb)
+                if stdout_str:
+                    output = f"[EXECUTION_FAILED_TRACEBACK]\n{tb}\nStandard Output before error:\n{stdout_str}"
+                else:
+                    output = f"[EXECUTION_FAILED_TRACEBACK]\n{tb}"
+                    
+                if "ee." in tb:
+                    try:
+                        import re
+                        from .tools.tools import execute_atomic_tool
+                        matches = re.findall(r'ee\.[a-zA-Z0-9_\.]+', tb)
+                        if matches:
+                            best_match = sorted(matches, key=len, reverse=True)[0]
+                            search_term = best_match.split('.')[-1]
+                            fallback_info = execute_atomic_tool(self.iface, "search_gee_api", {"query": search_term})
+                            if not fallback_info.startswith("No API found") and not fallback_info.startswith("Error") and not fallback_info.startswith("Failed"):
+                                output += f"\n\n[GEE API FALLBACK (AUTO-RETRIEVED)]\nIt looks like a GEE API call failed. Here is the official signature for `{best_match}` (and related) to help you fix it:\n\n{fallback_info}"
+                    except Exception as e:
+                        self.logger.debug("Failed to retrieve GEE API fallback info: %s", e, exc_info=True)
+            finally:
+                if log_interceptor is not None:
+                    try:
+                        from qgis.core import QgsApplication
+                        QgsApplication.messageLog().messageReceived.disconnect(log_interceptor)
+                    except (ImportError, TypeError, RuntimeError, AttributeError) as e:
+                        self.logger.debug("Failed to disconnect messageLog interceptor: %s", e)
+
+            try:
+                removed_duplicates = self._cleanup_new_duplicate_layers(layer_snapshot_before)
+                layer_snapshot_after = self._snapshot_project_layers()
+                layer_delta = self._format_layer_delta(layer_snapshot_before, layer_snapshot_after, removed_duplicates)
+                if layer_delta:
+                    output += "\n\n[PROJECT LAYER CHANGES]\n" + layer_delta
+            except (AttributeError, RuntimeError, TypeError, ValueError) as e:
+                self.logger.warning("Failed to append layer change summary: %s", e, exc_info=True)
+        finally:
+            if self.harness_thread:
+                self.harness_thread.code_exec_response = output
+                self.harness_thread.code_exec_event.set()
 
     def _get_memory_path(self):
         from qgis.core import QgsProject
@@ -641,8 +687,8 @@ class QGISAIAgentPlugin:
                 
             db.save_messages(messages_to_save)
             self.logger.info("Saved sandbox memory to SQLite")
-        except Exception as e:
-            self.logger.error(f"Failed to save sandbox memory: {e}")
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+            self.logger.error(f"Failed to save sandbox memory: {e}", exc_info=True)
 
     def _current_project_key(self):
         try:
@@ -652,18 +698,19 @@ class QGISAIAgentPlugin:
             for attr in ("absoluteFilePath", "fileName"):
                 try:
                     value = getattr(project, attr)()
-                except Exception:
+                except (AttributeError, RuntimeError, TypeError):
                     value = ""
-                if value:
+                if isinstance(value, str) and value.strip() and "MagicMock" not in value:
                     project_path = value
                     break
-            home_path = project.homePath() or ""
+            raw_home = project.homePath()
+            home_path = raw_home if isinstance(raw_home, str) and raw_home.strip() and "MagicMock" not in raw_home else ""
             return "|".join([
                 os.path.normcase(os.path.abspath(project_path)) if project_path else "<unsaved>",
                 os.path.normcase(os.path.abspath(home_path)) if home_path else "<no_home>",
             ])
-        except Exception as e:
-            self.logger.warning(f"Failed to build project key: {e}")
+        except (ImportError, OSError, AttributeError, RuntimeError, TypeError, ValueError) as e:
+            self.logger.warning(f"Failed to build project key: {e}", exc_info=True)
             return "<unknown_project>"
 
     def _handle_project_context_changed(self, event_type):
@@ -712,8 +759,8 @@ class QGISAIAgentPlugin:
                 f"Loaded sandbox memory from SQLite: {len(self.global_messages)} messages, "
                 f"project_key={project_key}"
             )
-        except Exception as e:
-            self.logger.error(f"Failed to load sandbox memory: {e}")
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+            self.logger.error(f"Failed to load sandbox memory: {e}", exc_info=True)
         finally:
             self._memory_loading = False
                 

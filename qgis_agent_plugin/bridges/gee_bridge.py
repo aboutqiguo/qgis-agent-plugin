@@ -69,13 +69,13 @@ def clear_gee_auth():
     if os.path.exists(ee_path):
         try:
             shutil.rmtree(ee_path)
-        except:
+        except OSError:
             pass
     try:
         reset = getattr(ee, "Reset", None)
         if callable(reset):
             reset()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         pass
 
 class GEEAuth:
@@ -482,7 +482,7 @@ class GEEDriveSyncTask(QgsTask):
                         if size1 != size2 or size1 == 0:
                             all_stable = False
                             break
-                    except Exception:
+                    except OSError:
                         all_stable = False
                         break
                         
@@ -526,7 +526,7 @@ class GEECopyTask(QgsTask):
                             try:
                                 f_out.close()
                                 os.remove(part_path)
-                            except Exception:
+                            except OSError:
                                 pass
                             return False
                         chunk = f_in.read(1024 * 1024 * 5) # 5MB chunks
@@ -545,7 +545,7 @@ class GEECopyTask(QgsTask):
             try:
                 if os.path.exists(part_path):
                     os.remove(part_path)
-            except Exception:
+            except OSError:
                 pass
             self.exception = e
             return False
@@ -616,7 +616,7 @@ class GEEDownloader:
         )
         try:
             iface.messageBar().pushMessage("GEE Manual Download", message[:500], level=Qgis.MessageLevel.Critical, duration=30)
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError):
             pass
         raise GEEManualDownloadRequired(
             message,
@@ -644,7 +644,7 @@ class GEEDownloader:
         def _task_detail():
             try:
                 return str(task.progress_detail())
-            except Exception:
+            except (AttributeError, TypeError, ValueError, RuntimeError):
                 return str(getattr(task, "description", lambda: "")())
 
         def _on_progress(value):
@@ -657,7 +657,7 @@ class GEEDownloader:
 
         try:
             task.progressChanged.connect(_on_progress)
-        except Exception:
+        except (AttributeError, TypeError, RuntimeError):
             pass
 
         heartbeat = QTimer()
@@ -666,7 +666,7 @@ class GEEDownloader:
         def _heartbeat():
             try:
                 should_cancel = bool(cancel_callback and cancel_callback())
-            except Exception:
+            except (TypeError, ValueError, RuntimeError):
                 should_cancel = False
             if should_cancel:
                 cancel_requested["value"] = True
@@ -701,7 +701,7 @@ class GEEDownloader:
         if app:
             try:
                 app.aboutToQuit.disconnect(loop.quit)
-            except:
+            except (TypeError, RuntimeError):
                 pass
                 
         # A QgsTask whose run() returns False is also marked Terminated. Its
@@ -854,7 +854,7 @@ class GEEDownloader:
                 from osgeo import gdal
                 gdal.BuildVRT(vrt_path, copied_paths)
                 return vrt_path
-            except Exception as e:
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
                 logger.error(f"Failed to build VRT: {e}")
                 return copied_paths[0]
 
@@ -1015,7 +1015,7 @@ class GEEDownloader:
                 from osgeo import gdal
                 gdal.BuildVRT(vrt_path, downloaded_paths)
                 return vrt_path
-            except Exception as e:
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
                 logger.error(f"Failed to build VRT: {e}")
                 return downloaded_paths[0]
 
@@ -1261,7 +1261,7 @@ class GEEDownloader:
                 dataset.GetRasterBand(band_index).SetNoDataValue(float(no_data))
             dataset.FlushCache()
             dataset = None
-        except Exception as exc:
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError, AttributeError) as exc:
             logger.warning(f"Could not set raster NoData metadata for {path}: {exc}")
 
     @staticmethod
@@ -1274,7 +1274,7 @@ class GEEDownloader:
                 ).replace("\\", "/")
                 if layer_source == target_norm:
                     QgsProject.instance().removeMapLayer(layer_id)
-        except Exception as exc:
+        except (OSError, RuntimeError, AttributeError, TypeError, ValueError) as exc:
             logger.warning(f"Could not release an existing raster layer for overwrite: {exc}")
 
     @staticmethod

@@ -14,7 +14,7 @@ def _to_float(value: Any) -> Optional[float]:
         if value is None:
             return None
         return float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -23,7 +23,7 @@ def _gdal_inspect_raster(file_path: str, force_read: bool = True) -> Dict[str, A
 
     try:
         gdal.UseExceptions()
-    except Exception:
+    except (AttributeError, RuntimeError):
         pass
 
     errors: List[str] = []
@@ -68,7 +68,7 @@ def _gdal_inspect_raster(file_path: str, force_read: bool = True) -> Dict[str, A
                 band_info["maximum"] = _to_float(stats[1])
                 band_info["mean"] = _to_float(stats[2])
                 band_info["stddev"] = _to_float(stats[3])
-        except Exception as exc:
+        except (RuntimeError, ValueError, TypeError, IndexError) as exc:
             band_info["read_ok"] = False
             errors.append(f"band {band_index} statistics failed: {exc}")
 
@@ -79,7 +79,7 @@ def _gdal_inspect_raster(file_path: str, force_read: bool = True) -> Dict[str, A
                 mask_stats = band.GetMaskBand().GetStatistics(False, True)
                 if mask_stats:
                     valid_percent = max(0.0, min(100.0, float(mask_stats[2]) / 255.0 * 100.0))
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, IndexError, AttributeError):
                 pass
         if valid_percent is not None:
             band_info["valid_percent"] = valid_percent
@@ -87,7 +87,7 @@ def _gdal_inspect_raster(file_path: str, force_read: bool = True) -> Dict[str, A
         if force_read:
             try:
                 band_info["checksum"] = int(band.Checksum())
-            except Exception as exc:
+            except (RuntimeError, ValueError, TypeError) as exc:
                 band_info["read_ok"] = False
                 errors.append(f"band {band_index} checksum/read failed: {exc}")
 
@@ -146,7 +146,7 @@ def _qgis_inspect_raster(file_path: str, force_read: bool = True) -> Dict[str, A
             band_info["maximum"] = _to_float(stats.maximumValue)
             band_info["mean"] = _to_float(stats.mean)
             band_info["stddev"] = _to_float(stats.stdDev)
-        except Exception as exc:
+        except (AttributeError, RuntimeError, ValueError, TypeError) as exc:
             band_info["read_ok"] = False
             info["read_ok"] = False
             info["read_errors"].append(f"band {band_index} statistics failed: {exc}")
@@ -297,7 +297,7 @@ def _resolve_raster_path(layer_or_path: str) -> str:
                 src = str(lyr.source() or "").split("|")[0]
                 if os.path.exists(src):
                     return os.path.abspath(src)
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError, TypeError):
         pass
     return os.path.abspath(raw)
 
@@ -321,11 +321,11 @@ def _release_qgis_layers_locking_path(target_path: str, layer_name: str = "") ->
                 if norm_src == norm_target or name_match:
                     removed_names.append(str(lyr.name() or lid))
                     proj.removeMapLayer(lid)
-            except Exception:
+            except (AttributeError, RuntimeError, TypeError, ValueError):
                 continue
         if removed_names:
             gc.collect()
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError, TypeError):
         pass
     return removed_names
 
@@ -716,7 +716,7 @@ def compute_raster_index(
                 if rl.isValid():
                     QgsProject.instance().addMapLayer(rl)
                     loaded_layer_id = str(rl.id() or "")
-            except Exception:
+            except (ImportError, AttributeError, RuntimeError, TypeError):
                 pass
 
         validation = validate_raster_has_data(out_abs, bands=[1], min_valid_percent=0.01, force_read=True)

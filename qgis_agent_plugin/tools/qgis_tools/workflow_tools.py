@@ -285,7 +285,7 @@ def clip_vector_layers_to_boundary(
 
     try:
         processing.core.Processing.Processing.initialize()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         pass
 
     project = QgsProject.instance()
@@ -351,7 +351,7 @@ def clip_vector_layers_to_boundary(
             feature_count = None
             try:
                 feature_count = int(layer.featureCount())
-            except Exception:
+            except (AttributeError, RuntimeError, TypeError, ValueError):
                 pass
 
             if create_spatial_index:

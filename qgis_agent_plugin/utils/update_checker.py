@@ -24,7 +24,7 @@ class UpdateChecker:
                 for line in resp.text.split('\n'):
                     if line.startswith('version='):
                         return line.strip().split('=')[1]
-        except Exception:
+        except (requests.RequestException, OSError, ValueError, IndexError):
             pass
         return None
 
@@ -36,22 +36,24 @@ class UpdateChecker:
             l_parts = tuple(map(int, local_v.split('.')))
             r_parts = tuple(map(int, remote_v.split('.')))
             return r_parts > l_parts
-        except Exception:
+        except (ValueError, TypeError, AttributeError):
             # Fallback to string comparison if not standard X.Y.Z format
             return remote_v != local_v
 
     @staticmethod
     def download_and_install_update(version):
-        import urllib.request
         import zipfile
         import tempfile
         
-        # fallback zip url (since user might name it differently, we will try the standard format)
         url = f"https://github.com/aboutqiguo/qgis-agent-plugin/releases/download/v{version}/qgis_agent_plugin_v{version}.zip"
-        
+        tmp_zip = os.path.join(tempfile.gettempdir(), f"qgis_agent_plugin_update_{version}.zip")
         try:
-            tmp_zip = os.path.join(tempfile.gettempdir(), f"qgis_agent_plugin_update_{version}.zip")
-            urllib.request.urlretrieve(url, tmp_zip)
+            resp = requests.get(url, timeout=30, stream=True)
+            resp.raise_for_status()
+            with open(tmp_zip, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        fh.write(chunk)
             
             plugin_dir = os.path.dirname(os.path.dirname(__file__))
             plugins_root = os.path.dirname(plugin_dir)
@@ -64,10 +66,15 @@ class UpdateChecker:
                     return False, "更新包结构不正确：未找到 qgis_agent_plugin/metadata.txt。"
                 zip_ref.extractall(plugins_root)
                 
-            os.remove(tmp_zip)
             return True, "🎉 更新下载并覆盖成功！\n\n请彻底关闭并重启 QGIS 以使新版本生效。"
         except Exception as e:
             return False, f"自动更新失败（可能是网络问题或包名不匹配）:\n{str(e)}\n\n请尝试手动下载 ZIP 包或使用插件库进行更新。"
+        finally:
+            if os.path.exists(tmp_zip):
+                try:
+                    os.remove(tmp_zip)
+                except OSError:
+                    pass
 
 class AsyncUpdateCheckThread(QThread):
     finished_signal = pyqtSignal(bool, str, str)  # has_update, local_v, remote_v

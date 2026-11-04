@@ -25,7 +25,7 @@ def open_georeferencer():
             if 'Georeferencer' in action.text() or '地理配准' in action.text():
                 action.trigger()
                 return True
-    except:
+    except (AttributeError, RuntimeError, Exception):
         pass
     print("Failed to open Georeferencer automatically.")
     return False

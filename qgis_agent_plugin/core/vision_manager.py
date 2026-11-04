@@ -88,7 +88,7 @@ def image_to_data_url(
             mime = "image/png" if save_format == "PNG" else "image/jpeg"
             b64_str = base64.b64encode(raw_bytes).decode("utf-8")
             return f"data:{mime};base64,{b64_str}"
-    except Exception:
+    except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
         pass
 
     # Standard fallback: read bytes directly

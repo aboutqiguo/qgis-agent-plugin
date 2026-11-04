@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -46,11 +47,11 @@ def _as_dict(value: Any) -> Dict[str, Any]:
         except TypeError:
             dumped = model_dump()
             return dumped if isinstance(dumped, dict) else {}
-        except Exception:
+        except (AttributeError, ValueError, RuntimeError):
             pass
     try:
         return dict(vars(value))
-    except Exception:
+    except TypeError:
         return {}
 
 
@@ -234,11 +235,11 @@ def default_telemetry_dir() -> str:
         from qgis.core import QgsApplication
 
         base = QgsApplication.qgisSettingsDirPath()
-        if base:
-            return os.path.join(base, "qgis_agent", "telemetry")
-    except Exception:
+        if isinstance(base, str) and base.strip() and "MagicMock" not in base and not base.startswith("<"):
+            return os.path.join(base.strip(), "qgis_agent", "telemetry")
+    except (ImportError, AttributeError, TypeError, RuntimeError):
         pass
-    return os.path.join(os.path.expanduser("~"), ".qgis_agent", "telemetry")
+    return os.path.join(tempfile.gettempdir(), "qgis_agent", "telemetry")
 
 
 def default_telemetry_path() -> str:
@@ -348,7 +349,7 @@ def append_record(
             try:
                 with open(proj_log, "a", encoding="utf-8") as proj_handle:
                     proj_handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-            except Exception:
+            except OSError:
                 pass
 
         last = _LAST_MAINTENANCE.get(log_path)

@@ -54,7 +54,7 @@ def inspect_saved_project(project_path: str) -> Dict[str, Any]:
         payload["layer_count"] = len(layers)
         payload["ok"] = True
         return payload
-    except Exception as exc:
+    except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError, TypeError) as exc:
         payload["warnings"].append(f"Could not inspect saved project: {exc}")
         return payload
 
@@ -70,7 +70,7 @@ def save_project_and_verify(
     expected = [name for name in (expected_layers or []) if name]
     try:
         from qgis.core import QgsProject
-    except Exception as exc:
+    except (ImportError, AttributeError, RuntimeError) as exc:
         return ToolResult.failure(
             f"QGIS project API is unavailable: {exc}",
             error_type="qgis_layer_error",
@@ -82,12 +82,12 @@ def save_project_and_verify(
         project_path = os.path.abspath(project_path)
         try:
             project.setFileName(project_path)
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError):
             pass
     else:
         try:
             project_path = project.fileName()
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError):
             project_path = ""
 
     if not project_path:
@@ -112,13 +112,13 @@ def save_project_and_verify(
     except TypeError:
         try:
             saved = bool(project.write())
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
             return ToolResult.failure(
                 f"Failed to save QGIS project: {exc}",
                 error_type="file_path_error",
                 data={"project_path": project_path, "expected_layers": expected},
             ).to_dict()
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return ToolResult.failure(
             f"Failed to save QGIS project: {exc}",
             error_type="file_path_error",

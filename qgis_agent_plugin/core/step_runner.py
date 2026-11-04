@@ -113,7 +113,7 @@ def is_execution_tool(tool_name: str) -> bool:
         spec = get_tool_spec(tool_name)
         if spec is not None:
             return not bool(spec.read_only)
-    except Exception:
+    except (ImportError, AttributeError, TypeError, KeyError):
         pass
     # Unknown tools are treated conservatively as execution tools.
     return True

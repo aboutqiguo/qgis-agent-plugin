@@ -86,7 +86,7 @@ def emit_progress(
     if callback:
         try:
             callback(event)
-        except Exception:
+        except (TypeError, ValueError, RuntimeError, AttributeError):
             pass
     return event
 
@@ -96,7 +96,7 @@ def raise_if_cancelled(cancel_callback, message="Data acquisition was cancelled 
         return
     try:
         cancelled = bool(cancel_callback())
-    except Exception:
+    except (TypeError, ValueError, RuntimeError, AttributeError):
         cancelled = False
     if cancelled:
         raise DataAcquisitionCancelled(message)

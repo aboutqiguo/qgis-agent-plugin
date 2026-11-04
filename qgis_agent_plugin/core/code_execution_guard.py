@@ -81,7 +81,21 @@ def _blocked_call_reason(name: str) -> Optional[CodeGuardFinding]:
             "Blocking sleep calls are not allowed on the QGIS main thread.",
             "Use a registered asynchronous workflow or QgsTask instead.",
         )
-    if lowered in {"exec", "eval", "compile", "__import__"}:
+    if lowered in {
+        "exec",
+        "eval",
+        "compile",
+        "__import__",
+        "builtins.exec",
+        "builtins.eval",
+        "builtins.compile",
+        "builtins.__import__",
+        "__builtins__.exec",
+        "__builtins__.eval",
+        "__builtins__.compile",
+        "__builtins__.__import__",
+        "importlib.import_module",
+    }:
         return CodeGuardFinding(
             "Dynamic code evaluation is not allowed inside approved PyQGIS scripts.",
             "Put the complete, reviewable code directly in the tool call.",
@@ -91,15 +105,47 @@ def _blocked_call_reason(name: str) -> Optional[CodeGuardFinding]:
             "The script may not replace the execution deadline tracer.",
             "Remove settrace calls.",
         )
-    if lowered.startswith(("subprocess.", "requests.", "httpx.", "aiohttp.", "urllib.request.")):
+    if lowered.startswith(("subprocess.", "requests.", "httpx.", "aiohttp.", "urllib.request.", "ctypes.")):
         return CodeGuardFinding(
-            "Synchronous process or network calls are not allowed in main-thread PyQGIS scripts.",
+            "Synchronous process, native FFI, or network calls are not allowed in main-thread PyQGIS scripts.",
             "Use a registered network/data-source tool or a cancellable background workflow.",
         )
-    if lowered in {"os.system", "os.popen"}:
+    if lowered in {
+        "os.system",
+        "os.popen",
+        "os.spawnl",
+        "os.spawnle",
+        "os.spawnlp",
+        "os.spawnlpe",
+        "os.spawnv",
+        "os.spawnve",
+        "os.spawnvp",
+        "os.spawnvpe",
+        "os.execl",
+        "os.execle",
+        "os.execlp",
+        "os.execlpe",
+        "os.execv",
+        "os.execve",
+        "os.execvp",
+        "os.execvpe",
+    }:
         return CodeGuardFinding(
             "External process execution is not allowed in PyQGIS scripts.",
             "Use a registered tool instead.",
+        )
+    if lowered in {
+        "os.remove",
+        "os.unlink",
+        "os.rmdir",
+        "os.removedirs",
+        "shutil.rmtree",
+        "pathlib.path.unlink",
+        "pathlib.path.rmdir",
+    } or lowered.endswith((".rmtree", ".removedirs")):
+        return CodeGuardFinding(
+            "Destructive filesystem deletion is not allowed in main-thread PyQGIS scripts.",
+            "Write outputs to a new file path instead of deleting existing files or directories.",
         )
     if lowered in {"processing.run", "processing.runandloadresults"}:
         return CodeGuardFinding(
@@ -144,7 +190,7 @@ def analyze_main_thread_code(code: str) -> List[CodeGuardFinding]:
         ))
 
     blocked_modules = {
-        "aiohttp", "ee", "httpx", "processing", "requests", "socket", "subprocess", "urllib"
+        "aiohttp", "ctypes", "ee", "httpx", "importlib", "multiprocessing", "processing", "pty", "requests", "socket", "subprocess", "urllib"
     }
     for node in nodes:
         if isinstance(node, ast.While):
@@ -175,6 +221,14 @@ def analyze_main_thread_code(code: str) -> List[CodeGuardFinding]:
             reason = _blocked_call_reason(name)
             if reason:
                 findings.append(CodeGuardFinding(reason.message, reason.suggestion, getattr(node, "lineno", 0)))
+            if name == "getattr" and node.args:
+                target_name = _qualified_name(node.args[0])
+                if target_name in {"__builtins__", "builtins"}:
+                    findings.append(CodeGuardFinding(
+                        "Dynamic builtin lookup via getattr(__builtins__, ...) is not allowed in PyQGIS scripts.",
+                        "Use standard, reviewable Python constructs directly.",
+                        getattr(node, "lineno", 0),
+                    ))
             if name == "iter" and len(node.args) == 2:
                 findings.append(CodeGuardFinding(
                     "Two-argument iter() can create a non-terminating sentinel loop on the QGIS main thread.",
@@ -331,6 +385,42 @@ def autofix_gdal_temporary_datasets(code: str):
     return fixed, len(spans)
 
 
+BLOCKED_RUNTIME_MODULES = frozenset({
+    "aiohttp",
+    "ctypes",
+    "ee",
+    "httpx",
+    "importlib",
+    "multiprocessing",
+    "processing",
+    "pty",
+    "requests",
+    "socket",
+    "subprocess",
+    "urllib",
+})
+
+
+def build_restricted_builtins() -> Dict[str, Any]:
+    import builtins as _builtins
+
+    real_import = _builtins.__import__
+
+    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        root = str(name or "").split(".", 1)[0].lower()
+        if root in BLOCKED_RUNTIME_MODULES:
+            raise MainThreadCodeRejected(
+                f"Module '{root}' is blocked at runtime in main-thread PyQGIS scripts."
+            )
+        return real_import(name, globals, locals, fromlist, level)
+
+    safe_builtins = dict(_builtins.__dict__)
+    for forbidden in ("eval", "exec", "compile", "breakpoint", "input"):
+        safe_builtins.pop(forbidden, None)
+    safe_builtins["__import__"] = _guarded_import
+    return safe_builtins
+
+
 def execute_main_thread_code(
     code: str,
     globals_dict: Dict[str, Any],
@@ -346,6 +436,7 @@ def execute_main_thread_code(
         keepalive.append(dataset)
         return dataset
 
+    globals_dict["__builtins__"] = build_restricted_builtins()
     globals_dict[GDAL_KEEPALIVE_HELPER] = _keep
     compiled = compile(code, "<qgis-agent-approved-code>", "exec")
     try:

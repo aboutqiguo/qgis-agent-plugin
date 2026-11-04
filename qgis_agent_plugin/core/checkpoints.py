@@ -67,7 +67,7 @@ class CheckpointManager:
             index_dir = os.path.join(self.project_home, ".qgis_agent_runs")
             try:
                 os.makedirs(index_dir, exist_ok=True)
-            except Exception:
+            except OSError:
                 pass
             return os.path.join(index_dir, "checkpoints_index.json")
         return ""
@@ -80,7 +80,7 @@ class CheckpointManager:
                     raw = json.load(f)
                     if isinstance(raw, list):
                         self.checkpoints = [TaskCheckpoint.from_dict(item) for item in raw if isinstance(item, dict)]
-            except Exception:
+            except (OSError, json.JSONDecodeError, ValueError, TypeError):
                 pass
 
     def _persist(self) -> None:
@@ -90,7 +90,7 @@ class CheckpointManager:
             try:
                 with open(run_file, "w", encoding="utf-8") as f:
                     json.dump(serialized, f, ensure_ascii=False, indent=2)
-            except Exception:
+            except (OSError, TypeError, ValueError):
                 pass
 
         index_file = self._get_project_index_file()
@@ -101,7 +101,7 @@ class CheckpointManager:
                     try:
                         with open(index_file, "r", encoding="utf-8") as f:
                             existing = json.load(f) or {}
-                    except Exception:
+                    except (OSError, json.JSONDecodeError, ValueError, TypeError):
                         existing = {}
                 key = self.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
                 existing[key] = {
@@ -111,7 +111,7 @@ class CheckpointManager:
                 }
                 with open(index_file, "w", encoding="utf-8") as f:
                     json.dump(existing, f, ensure_ascii=False, indent=2)
-            except Exception:
+            except (OSError, TypeError, ValueError):
                 pass
 
     def record_checkpoint(

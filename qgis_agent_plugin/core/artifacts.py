@@ -145,7 +145,7 @@ class AgentRunArtifacts:
                     continue
                 try:
                     events.append(json.loads(line))
-                except Exception:
+                except (json.JSONDecodeError, ValueError, TypeError):
                     events.append({"event": "unparseable", "raw": line})
         return events
 
@@ -304,7 +304,7 @@ class AgentRunArtifacts:
             if tool_name == "create_data_acquisition_plan" and isinstance(data.get("acquisition_plan"), dict):
                 paths = self.write_data_acquisition_plan(data["acquisition_plan"])
                 return {"type": "data_acquisition_plan", "paths": paths}
-        except Exception as exc:
+        except (OSError, ValueError, TypeError, KeyError) as exc:
             self.append_event("artifact_write_warning", {"tool": tool_name, "message": str(exc)})
         return {}
 
@@ -355,7 +355,7 @@ class AgentRunArtifacts:
             try:
                 with open(registry_health_path, "r", encoding="utf-8") as handle:
                     registry_health = json.load(handle)
-            except Exception:
+            except (OSError, json.JSONDecodeError, ValueError, TypeError):
                 registry_health = {}
 
         total = len(approvals)
@@ -531,13 +531,13 @@ class AgentRunArtifacts:
                             continue
                         try:
                             payload = json.loads(line)
-                        except Exception:
+                        except (json.JSONDecodeError, ValueError, TypeError):
                             continue
                         ts = str(payload.get("time") or payload.get("timestamp") or "")
                         if ts and ts < self.started_at.isoformat(timespec="seconds"):
                             continue
                         rows.append(payload)
-            except Exception as exc:
+            except (OSError, ValueError, TypeError) as exc:
                 return {
                     "ok": False,
                     "message": f"Could not read token usage log: {exc}",
@@ -842,6 +842,6 @@ def _parse_tool_result(result: Any) -> Dict[str, Any]:
         try:
             payload = json.loads(result)
             return payload if isinstance(payload, dict) else {}
-        except Exception:
+        except (json.JSONDecodeError, ValueError, TypeError):
             return {}
     return {}

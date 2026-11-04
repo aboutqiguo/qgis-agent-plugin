@@ -10,7 +10,7 @@
 [![QGIS](https://img.shields.io/badge/QGIS-3.28%20~%203.44-589632.svg?logo=qgis&logoColor=white)](https://qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
 [![LLM](https://img.shields.io/badge/LLM-DeepSeek%20V4-4D6BFE.svg)](https://platform.deepseek.com)
-[![Tests](https://img.shields.io/badge/tests-140%20passed-brightgreen.svg)](#-开发与测试)
+[![Tests](https://img.shields.io/badge/tests-153%20passed-brightgreen.svg)](#-开发与测试)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#-协议与致谢)
 
 [功能特性](#-核心特性) · [应用效果](#-应用效果展示) · [系统架构](#-系统架构) · [快速开始](#-快速开始) · [界面介绍](#-界面介绍) · [使用示例](#-使用示例) · [更新日志](#-更新日志)
@@ -362,7 +362,7 @@ QGIS 版本、插件版本、操作系统、任务提示词，以及插件目录
 - **权限模式**：仅可查看 / 工作区内修改 / 完全权限三级模式，外部路径写入需授权；
 - **记忆与缓存**：会话记忆原地更新避免「忘记上一轮」，新增缓存监控与费用估算面板；
 - **UI 修复**：Markdown 渲染保留 `snake_case` 下划线；批量移除图层不再触发 C++ 对象已删除异常；
-- 测试用例增至 140 项。
+- 测试用例增至 153 项（含真实 QGIS C++ 无头冒烟测试与 GitHub Actions CI）。
 
 <details>
 <summary><b>历史版本</b></summary>

@@ -164,7 +164,7 @@ def _qgis_layer_exists(layer_name: str) -> bool:
         from qgis.core import QgsProject
 
         return bool(QgsProject.instance().mapLayersByName(layer_name))
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError, TypeError):
         return False
 
 
@@ -177,7 +177,7 @@ def _artifact_integrity_checks(artifact_dir: str) -> List[Dict[str, Any]]:
             try:
                 with open(path, "r", encoding="utf-8") as handle:
                     ok = isinstance(json.load(handle), dict)
-            except Exception:
+            except (OSError, json.JSONDecodeError, ValueError, TypeError):
                 ok = False
         checks.append({"name": "artifact_integrity", "target": path, "ok": ok})
     return checks
@@ -207,7 +207,7 @@ def _verify_expected_output(output: Dict[str, Any], project_home: str) -> Tuple[
                 )
                 check["raster_validation"] = result
                 check["ok"] = bool(result.get("ok"))
-            except Exception as exc:
+            except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
                 check["ok"] = False
                 check["error"] = str(exc)
         if not check["ok"]:
@@ -238,7 +238,7 @@ def _verify_expected_output(output: Dict[str, Any], project_home: str) -> Tuple[
                     type_ok = check["band_count"] == int(output["band_count"])
             crs_ok = not output.get("crs") or check["crs"] == str(output.get("crs"))
             check["ok"] = bool(check["valid"] and type_ok and crs_ok)
-        except Exception as exc:
+        except (ImportError, AttributeError, RuntimeError, ValueError, TypeError) as exc:
             check["error"] = str(exc)
         if not check["ok"]:
             suggestions.append(f"Make expected layer satisfy its output contract: {target}")
@@ -317,14 +317,14 @@ def _style_checks(expected_layers: List[str]) -> Tuple[List[Dict[str, Any]], Lis
                     "ok": ok,
                     "renderer": renderer.__class__.__name__ if renderer else "",
                 })
-            except Exception as exc:
+            except (AttributeError, RuntimeError, TypeError) as exc:
                 checks.append({
                     "name": "layer_renderer_exists",
                     "target": getattr(layer, "name", lambda: "unknown")(),
                     "ok": False,
                     "message": str(exc),
                 })
-    except Exception as exc:
+    except (ImportError, AttributeError, RuntimeError, TypeError) as exc:
         warnings.append(f"QGIS style verification skipped: {exc}")
         checks.append({"name": "style_verification_available", "ok": True, "skipped": True})
     return checks, warnings

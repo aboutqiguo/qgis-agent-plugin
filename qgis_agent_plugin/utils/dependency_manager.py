@@ -13,7 +13,7 @@ def get_user_site_dir() -> str:
         user_site = site.getusersitepackages()
         if user_site and os.path.exists(user_site):
             return user_site
-    except Exception:
+    except (AttributeError, OSError, RuntimeError, TypeError):
         pass
     appdata = os.environ.get("APPDATA")
     if appdata:

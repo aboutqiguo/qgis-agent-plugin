@@ -41,7 +41,7 @@ class OverpassQueryError(Exception):
 def _safe_push_message(title: str, message: str, level=None, duration: int = 8) -> None:
     try:
         iface.messageBar().pushMessage(title, message, level=level or Qgis.MessageLevel.Info, duration=duration)
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         logger.info("%s: %s", title, message)
 
 
@@ -134,11 +134,11 @@ def safe_feature_count(layer) -> int:
         count = int(layer.featureCount())
         if count >= 0:
             return count
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError):
         pass
     try:
         return sum(1 for _ in layer.getFeatures())
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         return -1
 
 
@@ -235,7 +235,7 @@ def _write_overpass_debug_files(output_file: str, query: str, response_text: str
         if response_text:
             with open(os.path.join(base_dir, "last_overpass_error.html"), "w", encoding="utf-8") as handle:
                 handle.write(response_text)
-    except Exception:
+    except OSError:
         logger.exception("Failed to write Overpass debug artifacts.")
 
 
@@ -272,7 +272,7 @@ class OSMDownloader:
             if hasattr(request, "setTransferTimeout"):
                 try:
                     request.setTransferTimeout(int(timeout_seconds * 1000))
-                except Exception:
+                except (AttributeError, TypeError, ValueError, RuntimeError):
                     pass
 
             _safe_push_message("OSM", f"Downloading data from Overpass API: {endpoint}", Qgis.MessageLevel.Info)
@@ -289,7 +289,7 @@ class OSMDownloader:
                 timed_out["value"] = True
                 try:
                     reply.abort()
-                except Exception:
+                except (AttributeError, RuntimeError):
                     pass
                 loop.quit()
 
@@ -298,20 +298,20 @@ class OSMDownloader:
                 def _transfer_progress(received, total, current_endpoint=endpoint):
                     try:
                         transfer_progress_callback(int(received), int(total), current_endpoint)
-                    except Exception:
+                    except (TypeError, ValueError, RuntimeError):
                         pass
                 reply.downloadProgress.connect(_transfer_progress)
 
             def _check_cancel():
                 try:
                     should_cancel = bool(cancel_callback and cancel_callback())
-                except Exception:
+                except (TypeError, ValueError, RuntimeError):
                     should_cancel = False
                 if should_cancel:
                     cancelled["value"] = True
                     try:
                         reply.abort()
-                    except Exception:
+                    except (AttributeError, RuntimeError):
                         pass
                     loop.quit()
 
@@ -363,7 +363,7 @@ class OSMDownloader:
             if transfer_progress_callback:
                 try:
                     transfer_progress_callback(len(response_bytes), len(response_bytes), endpoint)
-                except Exception:
+                except (TypeError, ValueError, RuntimeError):
                     pass
 
             os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
@@ -405,7 +405,7 @@ class OSMDownloader:
         feature_count = -1
         try:
             feature_count = int(layer.featureCount())
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError, ValueError):
             pass
         if feature_count == 0:
             raise OverpassQueryError(
@@ -447,7 +447,7 @@ class OSMDownloader:
         if hasattr(request, "setTransferTimeout"):
             try:
                 request.setTransferTimeout(int(timeout_seconds * 1000))
-            except Exception:
+            except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass
 
         loop = QEventLoop()
@@ -467,7 +467,7 @@ class OSMDownloader:
         def _check_cancel():
             try:
                 should_cancel = bool(cancel_callback and cancel_callback())
-            except Exception:
+            except (TypeError, ValueError, RuntimeError):
                 should_cancel = False
             if should_cancel:
                 cancelled["value"] = True
@@ -478,7 +478,7 @@ class OSMDownloader:
             def _transfer(received, total):
                 try:
                     transfer_progress_callback(int(received), int(total), "https://nominatim.openstreetmap.org")
-                except Exception:
+                except (TypeError, ValueError, RuntimeError):
                     pass
             reply.downloadProgress.connect(_transfer)
         timeout_timer.timeout.connect(_timeout)
@@ -595,7 +595,7 @@ class OSMDownloader:
         try:
             ox.settings.use_cache = True
             ox.settings.cache_folder = cache_dir
-        except Exception:
+        except (AttributeError, TypeError, ValueError, OSError):
             logger.exception("Failed to set OSMnx cache folder.")
 
         os.makedirs(output_dir, exist_ok=True)
@@ -676,7 +676,7 @@ class OSMDownloader:
         def _check_cancel():
             try:
                 should_cancel = bool(cancel_callback and cancel_callback())
-            except Exception:
+            except (TypeError, ValueError, RuntimeError):
                 should_cancel = False
             if should_cancel:
                 task.cancel()

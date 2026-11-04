@@ -17,12 +17,12 @@ def inspect_qgis_layer(layer: Any) -> Dict[str, Any]:
 
     try:
         info["valid"] = bool(layer.isValid())
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         info["warnings"].append("Could not check layer validity.")
 
     try:
         info["name"] = layer.name()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         pass
 
     try:
@@ -33,7 +33,7 @@ def inspect_qgis_layer(layer: Any) -> Dict[str, Any]:
             info["type"] = "vector"
         elif layer_type == QgsMapLayerType.RasterLayer:
             info["type"] = "raster"
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError, TypeError):
         pass
 
     try:
@@ -41,7 +41,7 @@ def inspect_qgis_layer(layer: Any) -> Dict[str, Any]:
         info["crs"] = crs.authid() if crs and crs.isValid() else ""
         if not info["crs"]:
             info["warnings"].append("Layer CRS is missing or invalid.")
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         pass
 
     try:
@@ -49,12 +49,12 @@ def inspect_qgis_layer(layer: Any) -> Dict[str, Any]:
             info["feature_count"] = int(layer.featureCount())
             if info["feature_count"] == 0:
                 info["warnings"].append("Vector layer has zero features.")
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError, ValueError):
         pass
 
     try:
         info["extent"] = layer.extent().toString()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         pass
 
     return info
@@ -81,12 +81,12 @@ def inspect_project_layers() -> Dict[str, Any]:
     report = {"ok": True, "layers": [], "warnings": []}
     try:
         from qgis.core import QgsProject
-    except Exception as exc:
+    except (ImportError, AttributeError, RuntimeError) as exc:
         return {"ok": False, "layers": [], "warnings": [f"QGIS project inspection unavailable: {exc}"]}
 
     try:
         layers = list(QgsProject.instance().mapLayers().values())
-    except Exception as exc:
+    except (AttributeError, RuntimeError, TypeError) as exc:
         return {"ok": False, "layers": [], "warnings": [f"Could not read QGIS layers: {exc}"]}
 
     if not layers:

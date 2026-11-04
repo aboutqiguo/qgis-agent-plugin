@@ -40,7 +40,7 @@ def render_quick_map(output_path: str, layers: list = None, width: int = 800, he
             try:
                 ct = QgsCoordinateTransform(layer.crs(), target_crs, QgsProject.instance())
                 l_extent = ct.transformBoundingBox(l_extent)
-            except Exception:
+            except (AttributeError, RuntimeError, TypeError, ValueError):
                 pass
         extent.combineExtentWith(l_extent)
         

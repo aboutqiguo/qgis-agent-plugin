@@ -8,6 +8,7 @@ registered for future tasks only after a separate verified-registration approval
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -15,6 +16,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from .code_execution_guard import (
+    DEFAULT_MAIN_THREAD_TIMEOUT_SECONDS,
+    analyze_main_thread_code,
+    build_restricted_builtins,
+    execution_deadline,
+)
 
 
 REGISTRY_FILE_NAME = "registry.json"
@@ -41,6 +49,10 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
 def get_user_tool_root(create: bool = False) -> Path:
     """Return the active QGIS profile's user-tool directory.
 
@@ -56,13 +68,16 @@ def get_user_tool_root(create: bool = False) -> Path:
         try:
             from qgis.core import QgsApplication
 
-            settings_root = QgsApplication.qgisSettingsDirPath()
+            raw_root = QgsApplication.qgisSettingsDirPath()
+            settings_root = raw_root.strip() if isinstance(raw_root, str) else ""
+            if "MagicMock" in settings_root or settings_root.startswith("<"):
+                settings_root = ""
         except Exception:
             settings_root = ""
         if settings_root:
             root = Path(settings_root) / "qgis_agent" / "user_tools"
         else:
-            root = Path.home() / ".qgis_agent" / "user_tools"
+            root = Path(tempfile.gettempdir()) / "qgis_agent" / "user_tools"
 
     if create:
         root.mkdir(parents=True, exist_ok=True)
@@ -197,6 +212,13 @@ def _validate_source_contract(source_code: str) -> List[str]:
     for pattern, message in blocked_patterns:
         if re.search(pattern, source_code, flags=re.IGNORECASE):
             errors.append(message)
+
+    guard_findings = analyze_main_thread_code(source_code)
+    for finding in guard_findings:
+        prefix = f"line {finding.line}: " if finding.line else ""
+        msg = f"{prefix}{finding.message}"
+        if msg not in errors:
+            errors.append(msg)
     return errors
 
 
@@ -243,6 +265,7 @@ def _sanitize_definition(definition: Dict[str, Any], include_source: bool = Fals
         "last_error",
         "verification_summary",
         "source_file",
+        "source_sha256",
     }
     if include_source:
         safe_keys.add("source_code")
@@ -331,6 +354,7 @@ def create_or_update_user_tool(
         "last_error": "",
         "verification_summary": "",
         "source_file": f"{tool_name}.py",
+        "source_sha256": _sha256_text(source_code),
     }
     _atomic_write_text(_source_path(tool_name), source_code)
     registry["tools"][tool_name] = definition
@@ -394,6 +418,20 @@ def execute_user_tool(tool_name: str, iface: Any, arguments: Optional[Dict[str, 
             "suggestions": ["Recreate the candidate tool before running it."],
         }
 
+    expected_sha256 = str(definition.get("source_sha256") or "").strip()
+    actual_sha256 = _sha256_text(source_code)
+    if expected_sha256 and actual_sha256 != expected_sha256:
+        _record_execution(tool_name, False, "Source SHA-256 mismatch with registry")
+        return {
+            "ok": False,
+            "message": f"User tool '{tool_name}' source file failed integrity check (SHA-256 mismatch).",
+            "data": {"expected_sha256": expected_sha256, "actual_sha256": actual_sha256},
+            "artifacts": [],
+            "warnings": [],
+            "error_type": "integrity_error",
+            "suggestions": ["Recreate or re-verify the user tool through create_user_tool_extension."],
+        }
+
     validation_errors = _validate_source_contract(source_code)
     if validation_errors:
         _record_execution(tool_name, False, "; ".join(validation_errors))
@@ -409,12 +447,14 @@ def execute_user_tool(tool_name: str, iface: Any, arguments: Optional[Dict[str, 
 
     try:
         namespace: Dict[str, Any] = {
+            "__builtins__": build_restricted_builtins(),
             "__name__": f"qgis_agent_user_tool_{tool_name}",
             "__file__": str(source_path),
         }
-        exec(compile(source_code, str(source_path), "exec"), namespace, namespace)
-        runner = namespace["run"]
-        result = runner(iface, dict(arguments or {}))
+        with execution_deadline(DEFAULT_MAIN_THREAD_TIMEOUT_SECONDS):
+            exec(compile(source_code, str(source_path), "exec"), namespace, namespace)
+            runner = namespace["run"]
+            result = runner(iface, dict(arguments or {}))
     except Exception as exc:
         _record_execution(tool_name, False, str(exc))
         return {

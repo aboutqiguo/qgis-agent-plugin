@@ -15,7 +15,7 @@ def _canonical_source(source: str) -> str:
     try:
         if os.path.isabs(head) or os.path.exists(head):
             normalized_head = os.path.normcase(os.path.abspath(head)).replace("\\", "/")
-    except Exception:
+    except (OSError, ValueError, TypeError):
         pass
     return f"{normalized_head}{sep}{tail}"
 
@@ -23,21 +23,21 @@ def _canonical_source(source: str) -> str:
 def _layer_source(layer) -> str:
     try:
         return _canonical_source(layer.source())
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         return ""
 
 
 def _layer_name(layer) -> str:
     try:
         return layer.name()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         return ""
 
 
 def _layer_id(layer) -> str:
     try:
         return layer.id()
-    except Exception:
+    except (AttributeError, RuntimeError, TypeError):
         return ""
 
 
@@ -49,9 +49,7 @@ def _layer_is_usable(layer) -> bool:
         _layer_source(layer)
         _layer_name(layer)
         return True
-    except RuntimeError:
-        return False
-    except Exception:
+    except (RuntimeError, AttributeError, TypeError):
         return False
 
 
@@ -118,7 +116,7 @@ def remove_duplicate_layers(path: str = None, name: str = None, layer_type: str 
         try:
             project.removeMapLayer(layer_id)
             removed += 1
-        except Exception:
+        except (AttributeError, RuntimeError, ValueError, TypeError):
             pass
     return removed
 

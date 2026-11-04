@@ -9,7 +9,7 @@ def _ensure_user_site_packages():
         user_site = site.getusersitepackages()
         if user_site and os.path.exists(user_site) and user_site not in sys.path:
             sys.path.insert(0, user_site)
-    except Exception:
+    except (AttributeError, OSError, RuntimeError, TypeError):
         pass
 
     appdata = os.environ.get("APPDATA")

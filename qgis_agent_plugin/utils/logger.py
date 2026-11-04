@@ -16,7 +16,7 @@ class QgsMessageLogHandler(logging.Handler):
             else:
                 level = getattr(message_level, "Info", getattr(Qgis, "Info", None))
             QgsMessageLog.logMessage(msg, 'QGIS AI Agent', level)
-        except Exception:
+        except (ImportError, AttributeError, RuntimeError, TypeError):
             pass
 
 def get_logger():
