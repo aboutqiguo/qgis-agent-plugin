@@ -1,8 +1,8 @@
 <div align="center">
 
-# 馃審 QGIS AI Agent Copilot
+# 🌏 QGIS AI Agent Copilot
 
-**璁?QGIS 鍚噦鑷劧璇█ 鈥斺€?鍩轰簬 DeepSeek 鍘熺敓澶氭ā鎬佺殑 QGIS 鏅鸿兘 GIS 鍔╂墜**
+**让 QGIS 听懂自然语言 —— 基于 DeepSeek 原生多模态的 QGIS 智能 GIS 助手**
 
 *An AI Copilot for QGIS: natural-language geoprocessing, remote sensing, OSM / GEE data acquisition and cartography.*
 
@@ -10,336 +10,410 @@
 [![QGIS](https://img.shields.io/badge/QGIS-3.28%20~%203.44-589632.svg?logo=qgis&logoColor=white)](https://qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
 [![LLM](https://img.shields.io/badge/LLM-DeepSeek%20V4-4D6BFE.svg)](https://platform.deepseek.com)
-[![Tests](https://img.shields.io/badge/tests-140%20passed-brightgreen.svg)](#-寮€鍙戜笌娴嬭瘯)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](#-鍗忚涓庤嚧璋?
+[![Tests](https://img.shields.io/badge/tests-140%20passed-brightgreen.svg)](#-开发与测试)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#-协议与致谢)
 
-[鍔熻兘鐗规€(#-鏍稿績鐗规€? 路 [鏁堟灉灞曠ず](#-搴旂敤鏁堟灉) 路 [绯荤粺鏋舵瀯](#-绯荤粺鏋舵瀯) 路 [蹇€熷紑濮媇(#-蹇€熷紑濮? 路 [UI 浠嬬粛](#-鐣岄潰浠嬬粛) 路 [浣跨敤绀轰緥](#-浣跨敤绀轰緥) 路 [鏇存柊鏃ュ織](#-鏇存柊鏃ュ織)
+[功能特性](#-核心特性) · [应用效果](#-应用效果展示) · [系统架构](#-系统架构) · [快速开始](#-快速开始) · [界面介绍](#-界面介绍) · [使用示例](#-使用示例) · [更新日志](#-更新日志)
 
-![QGIS AI Agent 搴旂敤鏁堟灉](docs/images/demo_osm_transport.png)
+![QGIS AI Agent 应用效果](docs/images/demo_osm_transport.png)
 
 </div>
 
 ---
 
-## 馃摉 椤圭洰绠€浠?
-**QGIS AI Agent Copilot** 鏄竴涓繍琛屽湪 QGIS 鍐呴儴鐨勬櫤鑳戒綋锛圓gent锛夋彃浠躲€傚畠鎶?**澶ц瑷€妯″瀷锛圖eepSeek锛?*銆?*PyQGIS**銆?*QGIS Processing Toolbox锛?00+ 绠楁硶锛?*銆?*OpenStreetMap** 涓?**Google Earth Engine** 涓茶仈璧锋潵锛岀敤鎴峰彧闇€鍦ㄤ晶杈规爮鐢ㄤ腑鏂囨弿杩颁换鍔★紝Agent 灏变細鑷姩瀹屾垚锛?
-> 鐞嗚В鎰忓浘 鈫?鎷嗚В璁″垝 鈫?閫夋嫨宸ュ叿 鈫?鎵ц澶勭悊 鈫?鏍￠獙缁撴灉 鈫?鍔犺浇娓叉煋 鈫?淇濆瓨宸ョ▼ 鈫?姹囨姤鎬荤粨
+## 📖 项目简介
 
-涓庛€岃澶фā鍨嬪啓涓€娈典唬鐮佸啀鎵嬪姩绮樿创銆嶄笉鍚岋紝鏈彃浠跺湪 QGIS 涓瀯寤轰簡瀹屾暣鐨?**宸ュ叿璋冪敤闂幆**锛?4 涓粨鏋勫寲鍘熷瓙宸ュ叿銆佸弬鏁伴潤鎬佹牎楠屻€丳yQGIS 浠ｇ爜瀹夊叏瀹℃煡涓庤嚜鍔ㄤ慨澶嶃€佹墽琛屾柇鐐广€佺粨鏋滄牳楠屼笌宸ョ▼绾ц蹇嗭紝灏藉彲鑳借姣忎竴姝ラ兘 **鍙墽琛屻€佸彲楠岃瘉銆佸彲鎭㈠**銆?
+**QGIS AI Agent Copilot** 是一个运行在 QGIS 内部的智能体（Agent）插件。它把 **大语言模型（DeepSeek）**、**PyQGIS**、**QGIS Processing Toolbox（700+ 算法）**、**OpenStreetMap** 与 **Google Earth Engine** 串联起来，用户只需在侧边栏用中文描述任务，Agent 就会自动完成：
+
+> 理解意图 → 拆解计划 → 选择工具 → 执行处理 → 校验结果 → 加载渲染 → 保存工程 → 汇报总结
+
+与「让大模型写一段代码再手动粘贴」不同，本插件在 QGIS 中构建了完整的 **工具调用闭环**：64 个结构化原子工具、参数静态校验、PyQGIS 代码安全审查与自动修复、执行断点、结果核验与工程级记忆，尽可能让每一步都 **可执行、可验证、可恢复**。
+
 > [!WARNING]
-> **缃戠粶璇存槑锛欸oogle Earth Engine锛圙EE锛変笌 OpenStreetMap锛圤SM / Overpass / Nominatim锛夌浉鍏冲姛鑳介渶瑕佸湪鍙闂浗闄呬簰鑱旂綉鐨勭綉缁滅幆澧冿紙VPN / 浠ｇ悊锛変笅浣跨敤銆?*
-> 鍦ㄤ腑鍥藉ぇ闄嗙綉缁滅幆澧冧笅锛屾湭寮€鍚?VPN 鏃?GEE 璁よ瘉銆佸奖鍍忎笅杞姐€丟oogle Drive 鍚屾浠ュ強 OSM 杈圭晫 / 璺綉 / 瑕佺礌涓嬭浇鍧囧彲鑳借秴鏃舵垨澶辫触銆侱eepSeek 瀵硅瘽銆佹湰鍦版爡鏍?/ 鐭㈤噺鍒嗘瀽銆丳rocessing 绠楁硶璋冪敤涓嶅彈褰卞搷銆?
+> **网络说明：Google Earth Engine（GEE）与 OpenStreetMap（OSM / Overpass / Nominatim）相关功能需要在可访问国际互联网的网络环境（VPN / 代理）下使用。**
+> 在中国大陆网络环境下，未开启 VPN 时 GEE 认证、影像下载、Google Drive 同步以及 OSM 边界 / 路网 / 要素下载均可能超时或失败。DeepSeek 对话、本地栅格 / 矢量分析、Processing 算法调用不受影响。
+
 ---
 
-## 鉁?鏍稿績鐗规€?
-| 妯″潡 | 鑳藉姏 |
+## ✨ 核心特性
+
+| 模块 | 能力 |
 |---|---|
-| 馃 **鑷劧璇█ GIS 宸ヤ綔娴?* | 涓枃浠诲姟鑷姩鎷嗚В涓哄姝ラ璁″垝锛涙敮鎸佽鍒掑鎵广€佸垎姝ユ墽琛屻€佹柇鐐圭画璺戜笌澶辫触璇婃柇 |
-| 馃憗锔?**DeepSeek 鍘熺敓澶氭ā鎬?* | 鏃犻渶绗笁鏂硅瑙夊钩鍙帮紝鐩存帴瑙ｆ瀽鎴浘銆佸湴鍥剧敾甯冧笌鍥剧墖闄勪欢锛屽苟瀵瑰嚭鍥炬帓鐗堣繘琛岃瑙夎瘎瀹?|
-| 馃洶锔?**閬ユ劅鎸囨暟涓庡垎鍖虹粺璁?* | 鍐呯疆 `compute_raster_index` / `compute_raster_zonal_stats`锛岃嚜鍔ㄨ閬?UInt16 涓嬫孩锛屾敮鎸?NDVI / NDWI / MNDWI 绛夋寚鏁颁笌鎺╄啘鍒嗗尯缁熻 |
-| 馃椇锔?**OSM 鐭㈤噺鏁版嵁鑾峰彇** | 琛屾斂杈圭晫銆侀亾璺€侀搧璺€佸缓绛戙€丳OI銆佹按绯汇€佸湡鍦板埄鐢紱鑷姩鍒嗗潡銆佸幓閲嶃€佽鍓€侀噸鎶曞奖涓庡垎绾х鍙峰寲 |
-| 馃實 **GEE 浜戠閬ユ劅** | Sentinel-2銆丆opernicus DEM 涓嬭浇宸ヤ綔娴侊紱Earth Engine 鐩磋繛涓嬭浇 / Google Drive 鎵归噺瀵煎嚭涓ょ骇鏅鸿兘璺敱锛屾柇鐐圭画浼犱笌 GeoTIFF 瀹屾暣鎬ф牎楠?|
-| 鈿欙笍 **Processing 鍏ㄩ噺璋冪敤** | 鏈湴鏋勫缓 747 涓畻娉?/ 6262 涓弬鏁?/ 391 涓〃杈惧紡鍑芥暟鐨?Catalog锛涜皟鐢ㄥ墠 fail-closed 鍙傛暟鏍￠獙锛岃嚜鍔ㄨВ鏋愬浘灞傚悕 鈫?鏁版嵁婧?|
-| 馃洝锔?**瀹夊叏涓庢潈闄?* | 銆屼粎鍙煡鐪?/ 宸ヤ綔鍖哄唴淇敼 / 瀹屽叏鏉冮檺銆嶄笁绾фā寮忥紱鍒犻櫎鏂囦欢銆佹墽琛屼换鎰忎唬鐮併€佸畨瑁呬緷璧栫瓑楂樺嵄鎿嶄綔闇€浜哄伐瀹℃壒 |
-| 馃敡 **浠ｇ爜鑷剤** | PyQGIS 闈欐€佹牎楠屽櫒鎷︽埅 QGIS 3.44 楂橀 API 骞昏锛堝 `bandName`銆乣setClassificationMode`銆丟DAL 绫诲瀷璇敤锛夛紝GDAL 涓存椂鏁版嵁闆嗚嚜鍔ㄤ慨澶?|
-| 馃殗 **浠诲姟閲岀▼纰戣繘搴?* | 鍦伴搧绾胯矾鍥惧紡杩涘害鏉★紝涓枃鑺傜偣銆佽嚜鍔ㄦ崲琛岋紝瀹炴椂灞曠ず姣忎釜姝ラ鐨勫畬鎴?/ 杩愯 / 澶辫触鐘舵€?|
-| 馃捑 **璁板繂涓庣紦瀛?* | 鍏ㄥ眬缁忛獙姹?+ 宸ョ▼涓撳睘璁板繂锛圫QLite锛夛紱DeepSeek 鍓嶇紑缂撳瓨鐩戞帶锛屽疄娴嬬紦瀛樺懡涓巼 90%+锛岃垂鐢ㄨ妭鐪佺害 80% |
-| 馃З **鍙墿灞?* | 鏀寔鐢ㄦ埛鑷畾涔夊伐鍏凤紙User Tool Extensions锛変笌 Skill 瑙勫垯鏂囦欢锛孉gent 鍙矇娣€鍙鐢ㄧ殑澶勭悊鑳藉姏 |
+| 🧠 **自然语言 GIS 工作流** | 中文任务自动拆解为多步骤计划；支持计划审批、分步执行、断点续跑与失败诊断 |
+| 👁️ **DeepSeek 原生多模态** | 无需第三方视觉平台，直接解析截图、地图画布与图片附件，并对出图排版进行视觉评审 |
+| 🛰️ **遥感计算与影像解译** | 支持 NDVI / NDWI / MNDWI 等指数安全计算，集成掩膜统计与**机器学习样本构建、模型训练、精度验证与跨区域推理分割**全链路 |
+| 🗺️ **OSM 矢量数据获取** | 行政边界、道路、铁路、建筑、POI、水系、土地利用；自动分块、去重、裁剪、重投影与分级符号化 |
+| 🌍 **GEE 云端遥感** | Sentinel-2、Copernicus DEM 下载工作流；Earth Engine 直连下载 / Google Drive 批量导出两级智能路由，断点续传与 GeoTIFF 完整性校验 |
+| ⚙️ **Processing 全量调用** | 本地构建 747 个算法 / 6262 个参数 / 391 个表达式函数的 Catalog；调用前 fail-closed 参数校验，自动解析图层名 → 数据源 |
+| 🛡️ **安全与权限** | 「仅可查看 / 工作区内修改 / 完全权限」三级模式；删除文件、执行任意代码、安装依赖等高危操作需人工审批 |
+| 🔧 **代码自愈** | PyQGIS 静态校验器拦截 QGIS 3.44 高频 API 幻觉（如 `bandName`、`setClassificationMode`、GDAL 类型误用），GDAL 临时数据集自动修复 |
+| 🚇 **任务里程碑进度** | 地铁线路图式进度条，节点全中文、自动换行、防重叠，仅从当前任务提取步骤 |
+| 💾 **记忆与缓存** | 全局经验池 + 工程专属记忆（SQLite）；DeepSeek 前缀缓存监控，实测缓存命中率 90%+，费用节省约 80% |
+| 🧩 **可扩展** | 支持用户自定义工具（User Tool Extensions）与 Skill 规则文件，Agent 可沉淀可复用的处理能力 |
 
 ---
 
-## 馃幀 搴旂敤鏁堟灉
+## 🎬 应用效果展示
 
 <table>
 <tr>
-<td width="50%" align="center"><b>OSM 浜ら€氳矾缃戣幏鍙栥€佽鍓笌鍒嗙骇娓叉煋</b></td>
-<td width="50%" align="center"><b>DEM 濉醇銆佹祦鍚戜笌姘存枃鍒嗘瀽</b></td>
+<td width="50%" align="center"><b>OSM 交通路网获取、裁剪与分级渲染</b></td>
+<td width="50%" align="center"><b>DEM 填洼、流向与水文分析</b></td>
 </tr>
 <tr>
-<td><img src="docs/images/demo_osm_transport.png" alt="OSM 浜ら€氳矾缃?/></td>
-<td><img src="docs/images/demo_dem_hydrology.png" alt="DEM 姘存枃鍒嗘瀽"/></td>
+<td><img src="docs/images/demo_osm_transport.png" alt="OSM 交通路网"/></td>
+<td><img src="docs/images/demo_dem_hydrology.png" alt="DEM 水文分析"/></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><b>閬ユ劅褰卞儚鎺╄啘鍙犲姞涓庢按浣?/ 妞嶈鎸囨暟璁＄畻</b></td>
+<td align="center"><b>遥感影像掩膜叠加与水体 / 植被指数计算</b></td>
+<td align="center"><b>机器学习模型训练与跨区域迁移分割推理</b></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/images/demo_mask_index.png" alt="閬ユ劅鎸囨暟涓庢帺鑶?/></td>
+<td><img src="docs/images/demo_mask_index.png" alt="遥感指数与掩膜"/></td>
+<td><img src="docs/images/demo_ml_segmentation.png" alt="机器学习遥感解译分割"/></td>
 </tr>
 </table>
 
-**绀轰緥锛氥€岃幏鍙栬繖涓尯鍩熺殑浜ら€氱煝閲忔暟鎹€?* 鈥斺€?Agent 鑷姩瀹屾垚锛?
-1. 璇诲彇宸ョ▼涓殑 AOI 杈圭晫骞舵崲绠?WGS84 鑼冨洿锛?2. 浠?OSM 涓嬭浇閬撹矾 842 鏉°€侀搧璺?60 鏉★紙闇€ VPN锛夛紱
-3. 閲嶆姇褰卞埌 UTM 48N 骞舵寜 AOI 绮剧‘瑁佸壀锛?4. 鎸?`highway` 绛夌骇閰嶇疆鍒嗙骇绗﹀彿锛堥珮閫?/ 鍥界渷閬?/ 鍘夸埂閬?/ 灞呬綇 / 姝ヨ锛夛紱
-5. 缁熻璺綉鎬婚暱 410.9 km銆佽矾缃戝瘑搴?1.02 km/km虏锛屽苟淇濆瓨宸ョ▼銆?
+### 典型场景演示
+
+#### 场景 1：遥感影像机器学习分类与跨区域迁移解译
+> **「基于已标注红树林二值掩膜与多光谱影像，训练机器学习分类器，并在未知区域影像上完成推理分割」**
+- **步骤 1（样本准备与特征提取）**：Agent 依据源影像与标签掩膜，提取多波段反射率及多种光谱指数（NDVI、NDWI、MNDWI、波段比值等），自动构建平衡样本集并做空间分组交叉验证；
+- **步骤 2（模型训练与精度评估）**：自主训练随机森林等分类器，输出整体精度（OA 0.9767）、交并比（IoU 0.9594）与重要特征权重视图；
+- **步骤 3（未知区域推理分割）**：加载目标未知区域遥感影像，批量生成概率分布栅格与分类图层，自动完成连通域滤波与面积统计报表，全过程自动沉淀验证报告。
+
+#### 场景 2：OSM 矢量数据一键获取与智能制图
+> **「获取这个区域的交通矢量数据」**
+- 读取工程 AOI 边界并换算 WGS84 范围，调用 OSM 下载道路 842 条、铁路 60 条（需 VPN）；
+- 重投影至 UTM 平面投影并裁剪，按等级符号化渲染，统计路网总长 410.9 km 与路网密度 1.02 km/km² 并保存工程。
+
 ---
 
-## 馃彈锔?绯荤粺鏋舵瀯
+## 🏗️ 系统架构
 
 ```mermaid
 flowchart TB
-    U["馃懁 鐢ㄦ埛锛堜腑鏂囪嚜鐒惰瑷€ / 鎴浘 / @鍥惧眰锛?] --> UI
+    U["👤 用户（中文自然语言 / 截图 / @图层）"] --> UI
 
-    subgraph QGIS["QGIS 妗岄潰绔?]
-        UI["馃挰 Chat Dock 瀵硅瘽闈㈡澘<br/>Markdown 娓叉煋 路 閲岀▼纰戣繘搴?路 瀹℃壒寮圭獥"]
+    subgraph QGIS["QGIS 桌面端"]
+        UI["💬 Chat Dock 对话面板<br/>Markdown 渲染 · 里程碑进度 · 审批弹窗"]
         UI --> H
 
-        subgraph CORE["Agent 鏍稿績锛圚arnessThread锛?]
-            H["馃攣 Agent 涓诲惊鐜?br/>宸ュ叿璋冪敤 路 杩炵画澶辫触鐔旀柇 路 杞暟涓婇檺"]
-            RP["馃幆 Request Profile<br/>浠诲姟棰嗗煙璇嗗埆 路 鍔ㄦ€佸伐鍏峰寘"]
-            PL["馃搵 Planner / StepRunner / Verifier<br/>璁″垝瀹℃壒 路 鍒嗘鎵ц 路 缁撴灉鏍搁獙"]
-            CP["馃殗 Checkpoints<br/>鏂偣淇濆瓨 路 涓柇鎭㈠"]
-            MP["馃Ь Message Protocol<br/>tool_calls 搴忓垪淇"]
+        subgraph CORE["Agent 核心（HarnessThread）"]
+            H["🔁 Agent 主循环<br/>工具调用 · 连续失败熔断 · 轮数上限"]
+            RP["🎯 Request Profile<br/>任务领域识别 · 动态工具包"]
+            PL["📋 Planner / StepRunner / Verifier<br/>计划审批 · 分步执行 · 结果核验"]
+            CP["🚇 Checkpoints<br/>断点保存 · 中断恢复"]
+            MP["🧾 Message Protocol<br/>tool_calls 序列修复"]
             H <--> RP
             H <--> PL
             H <--> CP
             H <--> MP
         end
 
-        subgraph TOOLS["宸ュ叿灞傦紙64 涓師瀛愬伐鍏凤級"]
-            T1["馃搻 PyQGIS 鎵ц鍣?br/>闈欐€佹牎楠?路 浠ｇ爜淇 路 瀹夊叏瀹℃煡"]
-            T2["鈿欙笍 Processing 璋冪敤<br/>Catalog 妫€绱?路 鍙傛暟鏍￠獙"]
-            T3["馃洶锔?閬ユ劅鍒嗘瀽<br/>鎸囨暟璁＄畻 路 鍒嗗尯缁熻 路 鏍呮牸鏍￠獙"]
-            T4["馃梻锔?鍥惧眰涓庡伐绋?br/>鍔犺浇 路 娓呯悊 路 娓叉煋 路 淇濆瓨楠岃瘉"]
-            T5["馃З 鐢ㄦ埛鎵╁睍宸ュ叿 / Skills"]
+        subgraph TOOLS["工具层（64 个原子工具）"]
+            T1["📐 PyQGIS 执行器<br/>静态校验 · 代码修复 · 安全审查"]
+            T2["⚙️ Processing 调用<br/>Catalog 检索 · 参数校验"]
+            T3["🛰️ 遥感与机器学习<br/>指数计算 · 分区统计 · 模型解译"]
+            T4["🗂️ 图层与工程<br/>加载 · 清理 · 渲染 · 保存验证"]
+            T5["🧩 用户扩展工具 / Skills"]
         end
 
         H --> TOOLS
-        TOOLS --> PRJ[("馃椇锔?QGIS Project<br/>鍥惧眰 路 鐢诲竷 路 宸ョ▼鏂囦欢")]
+        TOOLS --> PRJ[("🗺️ QGIS Project<br/>图层 · 画布 · 工程文件")]
 
-        subgraph STORE["鎸佷箙鍖?]
-            M[("馃 SQLite 璁板繂<br/>鍏ㄥ眬 / 宸ョ▼")]
-            A[("馃搧 .qgis_agent_runs<br/>杩愯鏃ュ織 路 宸ュ叿璋冪敤 路 鎶ュ憡")]
-            C[("馃搳 缂撳瓨鐩戞帶<br/>cache_usage.jsonl")]
+        subgraph STORE["持久化"]
+            M[("🧠 SQLite 记忆<br/>全局 / 工程")]
+            A[("📁 .qgis_agent_runs<br/>运行日志 · 工具调用 · 报告")]
+            C[("📊 缓存监控<br/>cache_usage.jsonl")]
         end
         H <--> STORE
     end
 
-    H <==> LLM["鈽侊笍 DeepSeek API<br/>V4 Flash / Pro 路 鍘熺敓瑙嗚"]
+    H <==> LLM["☁️ DeepSeek API<br/>V4 Flash / Pro · 原生视觉"]
 
-    subgraph EXT["澶栭儴鏁版嵁婧愶紙闇€ VPN锛?]
-        OSM["馃椇锔?OpenStreetMap<br/>Nominatim 路 Overpass 路 OSMnx"]
-        GEE["馃實 Google Earth Engine<br/>Sentinel-2 路 DEM"]
-        GD["馃摝 Google Drive<br/>鎵归噺瀵煎嚭鍚屾"]
+    subgraph EXT["外部数据源（需 VPN）"]
+        OSM["🗺️ OpenStreetMap<br/>Nominatim · Overpass · OSMnx"]
+        GEE["🌍 Google Earth Engine<br/>Sentinel-2 · DEM"]
+        GD["📦 Google Drive<br/>批量导出同步"]
     end
     TOOLS --> OSM
     TOOLS --> GEE
     GEE --> GD
 ```
 
-### 涓€娆′换鍔＄殑鎵ц娴佺▼
+### 一次任务的执行流程
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as 鐢ㄦ埛
-    participant UI as 瀵硅瘽闈㈡澘
-    participant A as Agent 涓诲惊鐜?    participant L as DeepSeek
-    participant T as 宸ュ叿灞?    participant Q as QGIS 宸ョ▼
+    participant U as 用户
+    participant UI as 对话面板
+    participant A as Agent 主循环
+    participant L as DeepSeek
+    participant T as 工具层
+    participant Q as QGIS 工程
 
-    U->>UI: 璁＄畻 @shijiao_2019101 鐨?NDWI
-    UI->>A: 浠诲姟 + 鍥惧眰涓婁笅鏂囷紙@ 鎻愬強娉ㄥ叆锛?    A->>A: 璇嗗埆棰嗗煙锛屽喕缁撳伐鍏峰寘涓庢彁绀哄墠缂€锛堝埄浜庣紦瀛橈級
-    A->>L: 璇锋眰锛堢郴缁熸彁绀?+ 宸ョ▼涓婁笅鏂?+ 宸ュ叿 schema锛?    L-->>A: tool_call锛歩nspect_raster_file
-    A->>T: 鎵ц骞惰繑鍥炵粨鏋勫寲 ToolResult
-    L-->>A: tool_call锛歝ompute_raster_index锛圔3, B8锛?    A->>T: Float32 瀹夊叏璁＄畻锛屽啓鍑?GeoTIFF
-    T->>Q: 鍔犺浇鍥惧眰骞舵覆鏌?    A->>T: validate_project_outputs / save_project_and_verify
-    A-->>UI: 閲岀▼纰戣繘搴︽洿鏂?+ 涓枃鎬荤粨鎶ュ憡
+    U->>UI: 计算 @shijiao_2019101 的 NDWI
+    UI->>A: 任务 + 图层上下文（@ 提及注入）
+    A->>A: 识别领域，冻结工具包与提示前缀（利于缓存）
+    A->>L: 请求（系统提示 + 工程上下文 + 工具 schema）
+    L-->>A: tool_call：inspect_raster_file
+    A->>T: 执行并返回结构化 ToolResult
+    L-->>A: tool_call：compute_raster_index（B3, B8）
+    A->>T: Float32 安全计算，写出 GeoTIFF
+    T->>Q: 加载图层并渲染
+    A->>T: validate_project_outputs / save_project_and_verify
+    A-->>UI: 里程碑进度更新 + 中文总结报告
 ```
 
 ---
 
-## 馃殌 蹇€熷紑濮?
-### 1. 鐜瑕佹眰
+## 🚀 快速开始
 
-| 椤圭洰 | 瑕佹眰 |
+### 1. 环境要求
+
+| 项目 | 要求 |
 |---|---|
-| QGIS | 鏈€浣?`3.28`锛屾帹鑽?`3.34 LTR` 鎴?`3.44` |
-| Python 渚濊禆 | `openai`锛堝繀闇€锛夈€乣earthengine-api`锛圙EE锛夈€乣requests` |
-| 澶фā鍨?| [DeepSeek 寮€鏀惧钩鍙癩(https://platform.deepseek.com) API Key |
-| 缃戠粶 | **GEE / OSM 鍔熻兘闇€寮€鍚?VPN**锛涘彲閫?Google Drive Desktop 鐢ㄤ簬澶ф枃浠跺悓姝?|
+| QGIS | 最低 `3.28`，推荐 `3.34 LTR` 或 `3.44` |
+| Python 依赖 | `openai`（必需）、`earthengine-api`（GEE）、`requests` |
+| 大模型 | [DeepSeek 开放平台](https://platform.deepseek.com) API Key |
+| 网络 | **GEE / OSM 功能需开启 VPN**；可选 Google Drive Desktop 用于大文件同步 |
 
-### 2. 瀹夎鎻掍欢
+### 2. 安装插件
 
-1. 浠?[Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 涓嬭浇 `qgis_agent_plugin_v1.4.0.zip`锛?2. QGIS 鑿滃崟 `鎻掍欢` 鈫?`绠＄悊骞跺畨瑁呮彃浠禶 鈫?`浠?ZIP 瀹夎`锛?3. 閫夋嫨 ZIP 鏂囦欢瀹夎骞堕噸鍚?QGIS锛?4. 宸ュ叿鏍忕偣鍑?**QGIS AI Agent Copilot** 鎵撳紑鍙充晶瀵硅瘽闈㈡澘銆?
+1. 从 [Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 下载 `qgis_agent_plugin_v1.4.0.zip`；
+2. QGIS 菜单 `插件` → `管理并安装插件` → `从 ZIP 安装`；
+3. 选择 ZIP 文件安装并重启 QGIS；
+4. 工具栏点击 **QGIS AI Agent Copilot** 打开右侧对话面板。
+
 > [!TIP]
-> 棣栨鍙戦€佹秷鎭椂锛屽妫€娴嬪埌缂哄皯 `openai` 渚濊禆锛屾彃浠朵細寮圭獥鎻愮ず涓€閿嚜鍔ㄥ畨瑁呫€?
-### 3. 鎵嬪姩瀹夎渚濊禆锛堝彲閫夛級
+> 首次发送消息时，如检测到缺少 `openai` 依赖，插件会弹窗提示一键自动安装。
 
-**Windows**锛氬湪 QGIS 瀵瑰簲鐨?OSGeo4W Shell 涓繍琛岋細
+### 3. 手动安装依赖（可选）
+
+**Windows**：在 QGIS 对应的 OSGeo4W Shell 中运行：
 
 ```cmd
-python -m pip install openai earthengine-api requests
+python -m pip install openai earthengine-api requests scikit-learn
 ```
 
 <details>
-<summary><b>macOS锛氬湪 QGIS Python 鎺у埗鍙颁腑瀹夎</b></summary>
+<summary><b>macOS：在 QGIS Python 控制台中安装</b></summary>
 
 ```python
 import sys, runpy
 
 original_argv = sys.argv[:]
-sys.argv = ["pip", "install", "--user", "openai", "earthengine-api", "requests",
+sys.argv = ["pip", "install", "--user", "openai", "earthengine-api", "requests", "scikit-learn",
             "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"]
 try:
     runpy.run_module("pip", run_name="__main__")
 except SystemExit as e:
-    print("瀹夎瀹屾垚锛岃褰诲簳閲嶅惎 QGIS" if e.code == 0 else f"閫€鍑虹爜锛歿e.code}")
+    print("安装完成，请彻底重启 QGIS" if e.code == 0 else f"退出码：{e.code}")
 finally:
     sys.argv = original_argv
 ```
 
 </details>
 
-### 4. 鍩虹閰嶇疆
+### 4. 基础配置
 
-鐐瑰嚮瀵硅瘽闈㈡澘鍙充笂瑙?鈿欙笍 鎵撳紑 **渚涘簲鍟嗛厤缃?*锛?
-1. **DeepSeek**锛氬～鍐?API Key锛圔ase URL 榛樿 `https://api.deepseek.com`锛夛紝鐐瑰嚮銆岄獙璇佽繛鎺ャ€嶏紱
-2. **Google Earth Engine**锛堝彲閫夛紝闇€ VPN锛夛細濉啓宸插惎鐢?Earth Engine API 鐨?Google Cloud Project ID锛岀偣鍑汇€岄噸鏂拌璇併€嶅畬鎴愭祻瑙堝櫒鎺堟潈锛?3. **璁板繂涓庢€ф牸**锛堝彲閫夛級锛氱偣鍑汇€屾瀯寤?/ 鍒锋柊鏈湴 Catalog銆嶇储寮曟湰鏈?Processing 绠楁硶锛屽彲鏄捐憲鎻愬崌绠楁硶璋冪敤鍑嗙‘鐜囥€?
+点击对话面板右上角 ⚙️ 打开 **供应商配置**：
+
+1. **DeepSeek**：填写 API Key（Base URL 默认 `https://api.deepseek.com`），点击「验证连接」；
+2. **Google Earth Engine**（可选，需 VPN）：填写已启用 Earth Engine API 的 Google Cloud Project ID，点击「重新认证」完成浏览器授权；
+3. **记忆与性格**（可选）：点击「构建 / 刷新本地 Catalog」索引本机 Processing 算法，可显著提升算法调用准确率。
+
 ---
 
-## 馃枼锔?鐣岄潰浠嬬粛
+## 🖥️ 界面介绍
 
-### 瀵硅瘽闈㈡澘
+### 对话面板
 
-- **瀵硅瘽鍖?*锛氭敮鎸?Markdown 琛ㄦ牸銆佷唬鐮佸潡銆佸彲鎶樺彔鐨勩€岎煣?鎬濊€冧笌鎵ц杩囩▼銆嶏紱
-- **@ 鎻愬強**锛氳緭鍏?`@鍥惧眰鍚峘 鑷姩娉ㄥ叆璇ュ浘灞傜殑 CRS銆佽寖鍥淬€佹暟鎹簮璺緞锛?- **浠诲姟閲岀▼纰戣繘搴?*锛氶暱浠诲姟浠ュ湴閾佺嚎璺浘灞曠ず姝ラ鐘舵€侊紙鉁?瀹屾垚 / 馃殕 杩愯 / 鉁?閬囬樆锛夛紱
-- **鏉冮檺妯″紡**锛氬簳閮ㄥ垏鎹€屼粎鍙煡鐪?/ 宸ヤ綔鍖哄唴淇敼 / 瀹屽叏鏉冮檺銆嶏紱
-- **妯″瀷涓庢€濊€冨己搴?*锛氬彲閫?DeepSeek-V4 Flash / Pro 鍙?High / Max / Disabled 鎬濊€冩ā寮忥紱
-- **瀹炴椂浠〃**锛氳疆娆°€佹鏁般€乼ok/s銆佺疮璁?Token銆佺紦瀛樺懡涓巼銆佷笂涓嬫枃鍗犵敤銆?
-<div align="center"><img src="docs/images/ui_metro_progress.png" width="600" alt="浠诲姟閲岀▼纰戣繘搴?/></div>
+- **对话区**：支持 Markdown 表格、代码块、可折叠的「🧠 思考与执行过程」；
+- **@ 提及**：输入 `@图层名` 自动注入该图层的 CRS、范围、数据源路径；
+- **任务里程碑进度**：长任务以地铁线路图展示步骤状态（✔ 完成 / 🚆 运行 / ✖ 遇阻）；
+- **权限模式**：底部切换「仅可查看 / 工作区内修改 / 完全权限」；
+- **模型与思考强度**：可选 DeepSeek-V4 Flash / Pro 及 High / Max / Disabled 思考模式；
+- **实时仪表**：轮次、步数、tok/s、累计 Token、缓存命中率、上下文占用。
 
-### 璁剧疆绐楀彛
+<div align="center">
+  <img src="docs/images/ui_metro_progress.png" width="750" alt="任务里程碑进度"/>
+  <p><sub>任务里程碑进度条：中文节点、自动折行、圆润轨道与节点状态实时渲染</sub></p>
+</div>
+
+### 设置窗口
 
 <table>
 <tr>
-<td width="50%" align="center"><b>DeepSeek 閰嶇疆</b><br/><sub>API 绔偣銆佸瘑閽ヤ笌杩炴帴楠岃瘉锛屽師鐢熷妯℃€佽瑙夊凡鍚敤</sub></td>
-<td width="50%" align="center"><b>缂撳瓨鐩戞帶</b><br/><sub>缂撳瓨鍛戒腑鐜囥€佽垂鐢ㄤ及绠椾笌鍓嶇紑绋冲畾鎬ц瘖鏂?/sub></td>
+<td width="50%" align="center"><b>DeepSeek 配置</b><br/><sub>API 端点、密钥与连接验证，原生多模态视觉已启用</sub></td>
+<td width="50%" align="center"><b>缓存监控</b><br/><sub>缓存命中率、费用估算与前缀稳定性诊断</sub></td>
 </tr>
 <tr>
-<td><img src="docs/images/ui_settings_deepseek.jpg" alt="DeepSeek 閰嶇疆"/></td>
-<td><img src="docs/images/ui_settings_cache.jpg" alt="缂撳瓨鐩戞帶"/></td>
+<td><img src="docs/images/ui_settings_deepseek.jpg" alt="DeepSeek 配置"/></td>
+<td><img src="docs/images/ui_settings_cache.jpg" alt="缓存监控"/></td>
 </tr>
 <tr>
-<td align="center"><b>Google Earth Engine 閰嶇疆</b><br/><sub>Project ID銆佽璇佷笌鐩磋繛 / Drive 涓嬭浇绛栫暐锛堥渶 VPN锛?/sub></td>
-<td align="center"><b>璁板繂涓庢€ф牸</b><br/><sub>AI 鎬ф牸銆佸叏灞€缁忛獙姹犮€佸伐绋嬭蹇嗕笌鏈湴 Processing Catalog</sub></td>
+<td align="center"><b>Google Earth Engine 配置</b><br/><sub>Project ID、认证与直连 / Drive 下载策略（需 VPN）</sub></td>
+<td align="center"><b>记忆与性格</b><br/><sub>AI 性格、全局经验池、工程记忆与本地 Processing Catalog</sub></td>
 </tr>
 <tr>
-<td><img src="docs/images/ui_settings_gee.jpg" alt="GEE 閰嶇疆"/></td>
-<td><img src="docs/images/ui_settings_memory.jpg" alt="璁板繂涓庢€ф牸"/></td>
+<td><img src="docs/images/ui_settings_gee.jpg" alt="GEE 配置"/></td>
+<td><img src="docs/images/ui_settings_memory.jpg" alt="记忆与性格"/></td>
 </tr>
 </table>
 
 ---
 
-## 馃挕 浣跨敤绀轰緥
+## 💡 使用示例
 
-| 鍦烘櫙 | 鎻愮ず璇嶇ず渚?| 缃戠粶 |
+| 场景 | 提示词示例 | 网络 |
 |---|---|---|
-| 閬ユ劅鎸囨暟 | `璁＄畻 @shijiao_2019101 杩欎釜鍖哄煙鐨?NDWI锛屽苟鐢ㄨ摑鑹叉笎鍙樻覆鏌揱 | 鏈湴 |
-| 鎺╄啘缁熻 | `鍩轰簬 @shijian_mask 缁熻 @shijiao_2019101 鍚勬尝娈靛湪鎺╄啘鍐呭鐨勫潎鍊间笌鏍囧噯宸甡 | 鏈湴 |
-| 鍥惧眰绠＄悊 | `鍒犻櫎闄や簡 @shijiao_2019101 浠ュ鐨勫浘灞傦紝骞跺姞杞?D:\data\mask.png` | 鏈湴 |
-| Processing | `灏嗗缓绛戠墿鍥惧眰瑁佸壀鍒扮爺绌跺尯杈圭晫鍐咃紝缁熻鏁伴噺骞朵繚瀛樺伐绋媊 | 鏈湴 |
-| 姘存枃鍒嗘瀽 | `鍩轰簬 DEM 鍋氬～娲笺€佹祦鍚戙€佹眹娴佺疮绉苟鎻愬彇娌崇綉` | 鏈湴 |
-| OSM 浜ら€?| `鑾峰彇杩欎釜鍖哄煙鐨勪氦閫氱煝閲忔暟鎹紝鎸夐亾璺瓑绾у垎绾ф覆鏌揱 | 馃攼 VPN |
-| OSM 杈圭晫 | `鑾峰彇闀挎矙甯傞洦鑺卞尯鐨勮鏀胯竟鐣屻€佸缓绛戠墿銆丳OI 鍜屾按绯籤 | 馃攼 VPN |
-| GEE 褰卞儚 | `鍩轰簬鐮旂┒鍖鸿竟鐣屼笅杞?2024 骞村瀛?Sentinel-2 SR锛屼簯閲?<20%锛孊2/B3/B4/B8锛?0 m锛宮edian 鍚堟垚` | 馃攼 VPN |
-| GEE DEM | `涓嬭浇鐮旂┒鍖?Copernicus DEM GLO-30锛?0 m锛孍PSG:4326锛屽苟鍔犺浇鍒?QGIS` | 馃攼 VPN |
+| 机器学习解译 | `基于 @shijian_mask 与 @shijiao_2019101 训练随机森林分类器，评估精度并在 @shankou_20191109 区域完成推理分割` | 本地 |
+| 遥感指数 | `计算 @shijiao_2019101 这个区域的 NDWI，并用蓝色渐变渲染` | 本地 |
+| 掩膜统计 | `基于 @shijian_mask 统计 @shijiao_2019101 各波段在掩膜内外的均值与标准差` | 本地 |
+| 图层管理 | `删除除了 @shijiao_2019101 以外的图层，并加载 D:\data\mask.png` | 本地 |
+| Processing | `将建筑物图层裁剪到研究区边界内，统计数量并保存工程` | 本地 |
+| 水文分析 | `基于 DEM 做填洼、流向、汇流累积并提取河网` | 本地 |
+| OSM 交通 | `获取这个区域的交通矢量数据，按道路等级分级渲染` | 🔐 VPN |
+| OSM 边界 | `获取长沙市雨花区的行政边界、建筑物、POI 和水系` | 🔐 VPN |
+| GEE 影像 | `基于研究区边界下载 2024 年夏季 Sentinel-2 SR，云量 <20%，B2/B3/B4/B8，10 m，median 合成` | 🔐 VPN |
+| GEE DEM | `下载研究区 Copernicus DEM GLO-30，30 m，EPSG:4326，并加载到 QGIS` | 🔐 VPN |
 
-**浣跨敤寤鸿**
+**使用建议**
 
-- 澶嶆潅浠诲姟寤鸿鍏堣 Agent 缁欏嚭璁″垝锛岀‘璁ゅ悗鍐嶆墽琛岋紱
-- GEE 璇锋眰瓒婃槑纭秺绋冲畾锛堟椂闂磋寖鍥淬€佹尝娈点€佷簯閲忋€佸垎杈ㄧ巼銆佸鐞嗘柟寮忋€佽緭鍑哄悕锛夛紱
-- 鍙犲姞鍒嗘瀽鍓嶇‘淇濊緭鍏ユ暟鎹?CRS銆佽寖鍥翠笌鍍忓厓澶у皬涓€鑷达紱
-- 浠诲姟涓柇鍚庯紝鐩存帴鍥炲銆岀户缁€嶅嵆鍙粠鏈€杩戠殑鎵ц鑺傜偣鎭㈠銆?
+- 复杂任务建议先让 Agent 给出计划，确认后再执行；
+- GEE 请求越明确越稳定（时间范围、波段、云量、分辨率、处理方式、输出名）；
+- 叠加分析前确保输入数据 CRS、范围与像元大小一致；
+- 任务中断后，直接回复「继续」即可从最近的执行节点恢复。
+
 ---
 
-## 馃實 GEE 鏁版嵁涓嬭浇绛栫暐
+## 🌍 GEE 数据下载策略
 
 ```text
-浼扮畻鑼冨洿銆佸儚鍏冩暟銆佹尝娈垫暟鍜岀綉鏍煎昂瀵?        鈹?        鈹溾攢鈹€ 婊¤冻 Earth Engine 鐩磋繛涓嬭浇闄愬埗
-        鈹?      鈫?getDownloadURL 鐩存帴涓嬭浇
-        鈹?      鈫?GeoTIFF 瀹屾暣鎬т笌鏈夋晥鍍忓厓楠岃瘉
-        鈹?        鈹斺攢鈹€ 瓒呴檺鎴栫洿杩炲け璐?                鈫?Export.image.toDrive锛堜换鍔″敮涓€鍓嶇紑锛?                鈫?Drive API 娴佸紡涓嬭浇 + 鏂偣缁紶
-                鈫?瀛楄妭鏁颁笌 GeoTIFF 鏍￠獙
-                鈫?澶辫触鏃跺洖閫€ Google Drive Desktop 鍚屾
-                鈫?浠嶅け璐ユ椂杩斿洖浜哄伐涓嬭浇淇℃伅
+估算范围、像元数、波段数和网格尺寸
+        │
+        ├── 满足 Earth Engine 直连下载限制
+        │       → getDownloadURL 直接下载
+        │       → GeoTIFF 完整性与有效像元验证
+        │
+        └── 超限或直连失败
+                → Export.image.toDrive（任务唯一前缀）
+                → Drive API 流式下载 + 断点续传
+                → 字节数与 GeoTIFF 校验
+                → 失败时回退 Google Drive Desktop 同步
+                → 仍失败时返回人工下载信息
 ```
 
 > [!IMPORTANT]
-> GEE 璁よ瘉銆佸鍑轰笌 Google Drive 涓嬭浇鍏ㄨ繃绋嬮兘闇€瑕佽闂?Google 鏈嶅姟锛岃纭繚 QGIS 杩涚▼鑳介€氳繃 VPN / 绯荤粺浠ｇ悊璁块棶澶栫綉銆?
----
-
-## 鉂?甯歌闂
-
-<details>
-<summary><b>OSM / GEE 涓嬭浇涓€鐩磋秴鏃舵垨鎶ョ綉缁滈敊璇紵</b></summary>
-
-璇风‘璁ゅ凡寮€鍚?VPN锛屼笖 QGIS 杩涚▼鍙互浣跨敤璇ヤ唬鐞嗭紙閮ㄥ垎 VPN 闇€寮€鍚€岀郴缁熶唬鐞嗐€嶆垨銆孴UN / 鍏ㄥ眬妯″紡銆嶏級銆傚彲鍦?QGIS `璁剧疆 鈫?閫夐」 鈫?缃戠粶` 涓厤缃唬鐞嗗悗閲嶈瘯銆?</details>
-
-<details>
-<summary><b>Agent 鎻愮ず銆屽綋鍓嶄换鍔℃湭鑳借嚜鍔ㄥ畬鎴愶紙宸插畨鍏ㄦ殏鍋滐級銆嶏紵</b></summary>
-
-涓洪槻姝㈡棤鎰忎箟鐨勯噸璇曟寰幆锛岃繛缁?4 娆″伐鍏峰け璐ユ垨杈惧埌鍗曚换鍔¤疆鏁颁笂闄愭椂浼氳嚜鍔ㄦ殏鍋滐紝骞朵繚鐣欏凡鐢熸垚鐨勫浘灞傘€傚彲鏍规嵁璇婃柇鍗＄墖涓殑鎶ラ敊璋冩暣鍙傛暟锛屾垨鍥炲銆岀户缁€嶄粠鏂偣鎭㈠銆?</details>
-
-<details>
-<summary><b>濡備綍闄嶄綆 Token 璐圭敤锛?/b></summary>
-
-鎻掍欢宸插喕缁撴瘡涓换鍔＄殑绯荤粺鎻愮ず涓庡伐鍏?schema 浠ユ彁鍗?DeepSeek 鍓嶇紑缂撳瓨鍛戒腑鐜囷紝鍙湪銆岃缃?鈫?缂撳瓨鐩戞帶銆嶆煡鐪嬪懡涓巼涓庤垂鐢ㄤ及绠椼€傚敖閲忓湪鍚屼竴宸ョ▼鍐呰繛缁彁闂晥鏋滄洿濂姐€?</details>
-
-<details>
-<summary><b>鎻愪氦 Issue 闇€瑕佹彁渚涗粈涔堬紵</b></summary>
-
-QGIS 鐗堟湰銆佹彃浠剁増鏈€佹搷浣滅郴缁熴€佷换鍔℃彁绀鸿瘝锛屼互鍙婃彃浠剁洰褰曚笅 `utils/agent_run.log` 鐨勭浉鍏崇墖娈垫垨鏈€灏忓彲澶嶇幇鏁版嵁銆?</details>
+> GEE 认证、导出与 Google Drive 下载全过程都需要访问 Google 服务，请确保 QGIS 进程能通过 VPN / 系统代理访问外网。
 
 ---
 
-## 馃搱 鏇存柊鏃ュ織
+## ❓ 常见问题
 
-### v1.4.0锛?026-11锛?
-- **鍘熺敓澶氭ā鎬?*锛氳瑙夎兘鍔涚粺涓€杩佺Щ鍒?DeepSeek 鍘熺敓閫氶亾锛岀Щ闄ょ涓夋柟瑙嗚骞冲彴渚濊禆锛?- **閬ユ劅宸ュ叿**锛氭柊澧?`compute_raster_index`銆乣compute_raster_zonal_stats`锛孎loat32 瀹夊叏璁＄畻閬垮厤 UInt16 涓嬫孩锛屾柊澧為仴鎰熸寚鏁?Skill锛?- **浠诲姟閲岀▼纰戣繘搴?*锛氬湴閾佺嚎璺浘寮忚繘搴︾粍浠讹紝鑺傜偣鍏ㄤ腑鏂囥€佽嚜鍔ㄦ崲琛屻€侀槻閲嶅彔锛屼粎浠庡綋鍓嶄换鍔℃彁鍙栨楠わ紱
-- **鏂偣涓庢仮澶?*锛氭墽琛岃妭鐐?Checkpoint銆佷腑鏂仮澶嶄笂涓嬫枃銆佽繛缁け璐ョ啍鏂笌涓枃璇婃柇鍗＄墖锛?- **Processing 澧炲己**锛氬浘灞傚悕 / ID 鑷姩瑙ｆ瀽涓烘暟鎹簮璺緞鎴栧浘灞傚璞★紝淇濈暀 `TEMPORARY_OUTPUT` 璇箟锛?- **浠ｇ爜鑷剤**锛氭柊澧?QGIS 3.44 娓叉煋鍣?/ GDAL 绫诲瀷绛夐珮棰?API 璇敤闈欐€佹嫤鎴紝GDAL 涓存椂鏁版嵁闆嗚嚜鍔ㄤ慨澶嶏紱
-- **鏉冮檺妯″紡**锛氫粎鍙煡鐪?/ 宸ヤ綔鍖哄唴淇敼 / 瀹屽叏鏉冮檺涓夌骇妯″紡锛屽閮ㄨ矾寰勫啓鍏ラ渶鎺堟潈锛?- **璁板繂涓庣紦瀛?*锛氫細璇濊蹇嗗師鍦版洿鏂伴伩鍏嶃€屽繕璁颁笂涓€杞€嶏紝鏂板缂撳瓨鐩戞帶涓庤垂鐢ㄤ及绠楅潰鏉匡紱
-- **UI 淇**锛歁arkdown 娓叉煋淇濈暀 `snake_case` 涓嬪垝绾匡紱鎵归噺绉婚櫎鍥惧眰涓嶅啀瑙﹀彂 C++ 瀵硅薄宸插垹闄ゅ紓甯革紱
-- 娴嬭瘯鐢ㄤ緥澧炶嚦 140 椤广€?
 <details>
-<summary><b>鍘嗗彶鐗堟湰</b></summary>
+<summary><b>OSM / GEE 下载一直超时或报网络错误？</b></summary>
 
-#### v1.3.3
-- 缁撴瀯鍖栬繍琛岀姸鎬佷笌淇濆畧瀹屾垚鍒ゅ畾锛涗慨澶嶅宸ュ叿娑堟伅鍗忚锛涜鍒掓ā寮忕粨鏋勫寲姝ラ涓?verifier锛?- OSM 鑷€傚簲鍒嗗潡銆佸幓閲嶄笌瀹夊叏鍐欏叆锛汫EE 鐩磋繛 / Drive 涓ょ骇璺敱涓庢柇鐐圭画浼狅紱
-- Processing 鍙傛暟 fail-closed 鏍￠獙锛涚簿绠€鎻愮ず璇嶄笌鍔ㄦ€佸伐鍏?schema銆?
-#### v1.3.2
-- QGIS 鏈€浣庣増鏈皟鏁翠负 3.28锛涙柊澧?DEM 涓嬭浇宸ヤ綔娴併€佹爡鏍兼湁鏁堝儚鍏冩牎楠屼笌 Processing Catalog銆?
-#### v1.3.1-beta
-- 寮哄寲宸ュ叿妯℃嫙娴嬭瘯锛涗紭鍖?OSM / GEE / Processing / Skill 鍗忓悓涓庨」鐩蹇嗐€?
-#### v1.1.0
-- 鍩虹鏋舵瀯銆佺嚎绋嬪畨鍏ㄤ笌 UI 鍏煎锛涘垵姝ユ帴鍏?OSM銆丟EE銆丳yQGIS 涓?Processing銆?
+请确认已开启 VPN，且 QGIS 进程可以使用该代理（部分 VPN 需开启「系统代理」或「TUN / 全局模式」）。可在 QGIS `设置 → 选项 → 网络` 中配置代理后重试。
+</details>
+
+<details>
+<summary><b>Agent 提示「当前任务未能自动完成（已安全暂停）」？</b></summary>
+
+为防止无意义的重试死循环，连续 4 次工具失败或达到单任务轮数上限时会自动暂停，并保留已生成的图层。可根据诊断卡片中的报错调整参数，或回复「继续」从断点恢复。
+</details>
+
+<details>
+<summary><b>如何降低 Token 费用？</b></summary>
+
+插件已冻结每个任务的系统提示与工具 schema 以提升 DeepSeek 前缀缓存命中率，可在「设置 → 缓存监控」查看命中率与费用估算。尽量在同一工程内连续提问效果更好。
+</details>
+
+<details>
+<summary><b>提交 Issue 需要提供什么？</b></summary>
+
+QGIS 版本、插件版本、操作系统、任务提示词，以及插件目录下 `utils/agent_run.log` 的相关片段或最小可复现数据。
 </details>
 
 ---
 
-## 馃懆鈥嶐煉?寮€鍙戜笌娴嬭瘯
+## 📈 更新日志
+
+### v1.4.0（2026-11）
+
+- **原生多模态**：视觉能力统一迁移到 DeepSeek 原生通道，移除第三方视觉平台依赖；
+- **遥感与机器学习**：新增 `compute_raster_index`、`compute_raster_zonal_stats`，Float32 安全计算避免 UInt16 下溢，新增遥感指数与机器学习推理分割 Skill；
+- **任务里程碑进度**：全新地铁线路图式进度组件，节点全中文、自动换行、防重叠，仅从当前任务提取步骤；
+- **断点与恢复**：执行节点 Checkpoint、中断恢复上下文、连续失败熔断与中文诊断卡片；
+- **Processing 增强**：图层名 / ID 自动解析为数据源路径或图层对象，保留 `TEMPORARY_OUTPUT` 语义；
+- **代码自愈**：新增 QGIS 3.44 渲染器 / GDAL 类型等高频 API 误用静态拦截，GDAL 临时数据集自动修复；
+- **权限模式**：仅可查看 / 工作区内修改 / 完全权限三级模式，外部路径写入需授权；
+- **记忆与缓存**：会话记忆原地更新避免「忘记上一轮」，新增缓存监控与费用估算面板；
+- **UI 修复**：Markdown 渲染保留 `snake_case` 下划线；批量移除图层不再触发 C++ 对象已删除异常；
+- 测试用例增至 140 项。
+
+<details>
+<summary><b>历史版本</b></summary>
+
+#### v1.3.3
+- 结构化运行状态与保守完成判定；修复多工具消息协议；计划模式结构化步骤与 verifier；
+- OSM 自适应分块、去重与安全写入；GEE 直连 / Drive 两级路由与断点续传；
+- Processing 参数 fail-closed 校验；精简提示词与动态工具 schema。
+
+#### v1.3.2
+- QGIS 最低版本调整为 3.28；新增 DEM 下载工作流、栅格有效像元校验与 Processing Catalog。
+
+#### v1.3.1-beta
+- 强化工具模拟测试；优化 OSM / GEE / Processing / Skill 协同与项目记忆。
+
+#### v1.1.0
+- 基础架构、线程安全与 UI 兼容；初步接入 OSM、GEE、PyQGIS 与 Processing。
+
+</details>
+
+---
+
+## 👨‍💻 开发与测试
 
 ```text
 qgis_agent_plugin/
-鈹溾攢鈹€ agent_plugin.py        鎻掍欢鍏ュ彛
-鈹溾攢鈹€ metadata.txt           QGIS 鎻掍欢鍏冩暟鎹?鈹溾攢鈹€ bridges/               GEE銆丱SM 澶栭儴鏁版嵁妗ユ帴
-鈹溾攢鈹€ core/                  Agent 涓诲惊鐜€佽鍒?楠岃瘉銆佸伐鍏锋敞鍐屻€佹牎楠屽櫒銆佽蹇嗐€丆atalog銆佹柇鐐?鈹溾攢鈹€ prompts/               绯荤粺鎻愮ず璇?鈹溾攢鈹€ skills/core/           GEE銆丱SM銆丟DAL 鍧戠偣銆佹姇褰遍€夋嫨銆佸埗鍥俱€侀仴鎰熸寚鏁扮瓑瑙勫垯
-鈹溾攢鈹€ tools/                 鍘熷瓙宸ュ叿瀹炵幇涓?qgis_tools 瀛愭ā鍧?鈹溾攢鈹€ ui/                    瀵硅瘽闈㈡澘銆佽缃獥鍙ｃ€丮arkdown 娓叉煋銆侀噷绋嬬杩涘害
-鈹斺攢鈹€ utils/                 鏃ュ織銆佷緷璧栫鐞嗐€佹洿鏂版鏌?tests/                     鍗曞厓娴嬭瘯涓庡伐鍏峰绾︽ā鎷熸祴璇?docs/                      鍥剧墖涓庢祴璇曟姤鍛?```
+├── agent_plugin.py        插件入口
+├── metadata.txt           QGIS 插件元数据
+├── bridges/               GEE、OSM 外部数据桥接
+├── core/                  Agent 主循环、规划/验证、工具注册、校验器、记忆、Catalog、断点
+├── prompts/               系统提示词
+├── skills/core/           GEE、OSM、GDAL 坑点、投影选择、制图、遥感指数等规则
+├── tools/                 原子工具实现与 qgis_tools 子模块
+├── ui/                    对话面板、设置窗口、Markdown 渲染、里程碑进度
+└── utils/                 日志、依赖管理、更新检查
+tests/                     单元测试与工具契约模拟测试
+docs/                      图片与测试报告
+```
 
 ```cmd
-pytest tests -q            # 杩愯娴嬭瘯
-python sync_dev.py         # 鍚屾鍒版湰鏈?QGIS 鎻掍欢鐩綍锛堝紑鍙戠敤锛?python build.py            # 鎵撳寘 qgis_agent_plugin_v1.4.0.zip
+pytest tests -q            # 运行测试
+python sync_dev.py         # 同步到本机 QGIS 插件目录（开发用）
+python build.py            # 打包 qgis_agent_plugin_v1.4.0.zip
 ```
 
 ---
 
-## 馃椇锔?璺嚎鍥?
-- [ ] 鏀寔鏇村 LLM 渚涘簲鍟嗭紙GLM銆丵wen銆丱penAI 鍏煎鎺ュ彛锛?- [ ] 鍑哄浘鎺掔増锛圠ayout锛夎嚜鍔ㄧ敓鎴愪笌瑙嗚杩唬璇勫
-- [ ] 鏇村閬ユ劅鏁版嵁婧愶紙Landsat銆丮ODIS锛変笌鍥藉唴鍙洿杩炴暟鎹簮
-- [ ] 鑻辨枃鐣岄潰涓庢枃妗?
+## 🗺️ 路线图
+
+- [ ] 支持更多 LLM 供应商（GLM、Qwen、OpenAI 兼容接口）
+- [ ] 出图排版（Layout）自动生成与视觉迭代评审
+- [ ] 更多遥感数据源（Landsat、MODIS）与国内可直连数据源
+- [ ] 英文界面与文档
+
 ---
 
-## 馃搫 鍗忚涓庤嚧璋?
-鏈」鐩噰鐢?**MIT License**銆?
-寮€鍙戣繃绋嬩腑鍙傝€冧簡 [GeoCode](https://github.com/chenyusheng2001/GeoCode)銆丼mart-QGIS銆乕qgis_mcp](https://github.com/jjsantos01/qgis_mcp)銆丮apAgent 绛夊紑婧愰」鐩湪 GIS Agent 鏂瑰悜鐨勮璁℃€濊矾锛屾劅璋㈢浉鍏冲紑婧愬伐浣溿€?
-娆㈣繋閫氳繃 [Issues](https://github.com/aboutqiguo/qgis-agent-plugin/issues) 鎻愪氦闂涓庡缓璁紝濡傛灉杩欎釜椤圭洰瀵逛綘鏈夊府鍔╋紝璇风偣涓€涓?猸?Star 鏀寔锛?
+## 📄 协议与致谢
+
+本项目采用 **MIT License**。
+
+开发过程中参考了 [GeoCode](https://github.com/chenyusheng2001/GeoCode)、Smart-QGIS、[qgis_mcp](https://github.com/jjsantos01/qgis_mcp)、MapAgent 等开源项目在 GIS Agent 方向的设计思路，感谢相关开源工作。
+
+欢迎通过 [Issues](https://github.com/aboutqiguo/qgis-agent-plugin/issues) 提交问题与建议，如果这个项目对你有帮助，请点一个 ⭐ Star 支持！
