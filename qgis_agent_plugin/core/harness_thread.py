@@ -90,6 +90,7 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
         self._tool_pack_expansion_count = 0
         self.recovery_context = None
         self._agent_message_emitted = False
+        self._turn_messages_start_idx = 0
         self._consecutive_tool_failures = 0
         from .step_runner import StepExecutionController
         self.step_controller = StepExecutionController()
@@ -109,6 +110,111 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
         self._agent_message_emitted = True
         self._last_summary = content
         self.append_message_signal.emit("AGENT", content)
+
+    def _format_llm_exception_for_user(self, exc: Exception) -> str:
+        status_code = getattr(exc, "status_code", None)
+        exc_str = str(exc)
+        exc_lower = exc_str.lower()
+        exc_type = type(exc).__name__
+
+        # 1. 余额不足 (402 / Insufficient Balance / Quota Exceeded)
+        if (
+            status_code == 402
+            or "402" in exc_str
+            or "insufficient balance" in exc_lower
+            or "insufficient_quota" in exc_lower
+            or "quota" in exc_lower
+            or "欠费" in exc_lower
+            or "余额不足" in exc_lower
+        ):
+            return (
+                "💳 **DeepSeek 账户余额不足 (Error 402: Insufficient Balance)**\n\n"
+                "您的 DeepSeek API 账户余额已耗尽或未充值，模型接口拒绝了本次请求。\n\n"
+                "💡 **解决方法**：\n"
+                "1. 请登录 [DeepSeek 开放平台控制台](https://platform.deepseek.com/) 检查账户余额并充值。\n"
+                "2. 充值到账后，您无需重启 QGIS，直接在下方输入框继续发送消息即可。\n"
+                "3. 如需切换至其他兼容服务商或中转 API，请点击插件顶部工具栏【设置 (⚙️)】修改 Base URL 和 API Key。"
+            )
+
+        # 2. 鉴权失败 / Key 无效 (401 / Unauthorized / Invalid Key)
+        if (
+            status_code == 401
+            or "401" in exc_str
+            or "unauthorized" in exc_lower
+            or "invalid api key" in exc_lower
+            or "invalid_api_key" in exc_lower
+            or "authentication" in exc_lower
+        ):
+            return (
+                "🔑 **API Key 认证失败 (Error 401: Unauthorized)**\n\n"
+                "所填写的 DeepSeek API Key 无效、已过期或已被删除。\n\n"
+                "💡 **解决方法**：\n"
+                "1. 请登录 [DeepSeek 开放平台](https://platform.deepseek.com/) 重新生成一个有效的 API Key。\n"
+                "2. 打开插件顶部工具栏【设置 (⚙️)】，粘贴新 Key 并保存后再试。"
+            )
+
+        # 3. 频次超限 / 并发过多 (429 / Rate Limit)
+        if (
+            status_code == 429
+            or "429" in exc_str
+            or "rate limit" in exc_lower
+            or "rate_limit_exceeded" in exc_lower
+            or "too many requests" in exc_lower
+        ):
+            return (
+                "⏱️ **API 请求频次超限 (Error 429: Rate Limit Exceeded)**\n\n"
+                "触发了服务商的请求频次限制（RPM）或并发连接数上限。\n\n"
+                "💡 **解决方法**：\n"
+                "请稍候 10~30 秒后再试；若持续超限，建议在服务商控制台查看当前的速率配额限制。"
+            )
+
+        # 4. 模型或路径不存在 (404 / Not Found)
+        if (
+            status_code == 404
+            or "404" in exc_str
+            or "not found" in exc_lower
+            or "model_not_found" in exc_lower
+        ):
+            model_info = getattr(self, "model_name", "当前模型")
+            return (
+                f"🔍 **模型不存在或接口地址有误 (Error 404: Not Found)**\n\n"
+                f"当前配置的模型 `{model_info}` 未被服务商识别，或 Base URL 地址不正确。\n\n"
+                "💡 **解决方法**：\n"
+                "请打开插件顶部工具栏【设置 (⚙️)】，确认模型名称（如 `deepseek-chat`）及 Base URL 填写正确。"
+            )
+
+        # 5. 服务端异常 (500 / 502 / 503 / 504 / Server Error)
+        if (
+            (status_code and 500 <= status_code < 600)
+            or any(code in exc_str for code in ["500", "502", "503", "504"])
+            or "bad gateway" in exc_lower
+            or "service unavailable" in exc_lower
+        ):
+            return (
+                f"🌐 **模型服务端暂时不可用 (Error {status_code or '5xx'}: Server Error)**\n\n"
+                "DeepSeek 服务端出现临时波动、网关异常或正在维护中。\n\n"
+                "💡 **解决方法**：\n"
+                "大模型官方服务端通常会在数分钟内自动恢复，建议稍候重新发送；您也可以访问服务商状态监控页确认服务运行情况。"
+            )
+
+        # 6. 网络连接 / 超时 / 代理阻断
+        if any(marker in exc_lower for marker in ["connection", "timeout", "timed out", "ssl", "connecterror", "remote disconnected", "proxy"]):
+            return (
+                f"🔌 **网络连接失败或超时 ({exc_type})**\n\n"
+                f"插件无法正常连接至大模型 API 服务器：`{exc_str}`\n\n"
+                "💡 **解决方法**：\n"
+                "1. 请检查本机网络连接是否畅通。\n"
+                "2. 若开启了 VPN 或网络代理，请检查代理设置或将 API 域名加入直连白名单。\n"
+                "3. 如需配置镜像代理地址，可打开插件【设置 (⚙️)】修改 Base URL。"
+            )
+
+        # 7. 兜底透传
+        preview_str = exc_str[:400] + ("..." if len(exc_str) > 400 else "")
+        return (
+            f"⚠️ **大模型接口调用异常 ({exc_type})**\n\n"
+            f"```text\n{preview_str}\n```\n\n"
+            "💡 **建议操作**：请检查网络环境或在插件【设置 (⚙️)】中验证 API 配置。"
+        )
 
 
 
@@ -419,12 +525,19 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
                 OpenAI = _OpenAI
             except ImportError:
                 self.logger.error("openai module is not installed.")
-                self.append_message_signal.emit(
-                    "SYSTEM",
-                    "❌ <b>缺少核心依赖库 'openai'</b><br>"
-                    "请打开插件【设置 (⚙️)】点击【安装/检查依赖】，或在终端运行：<br>"
-                    "<code>pip install openai</code>",
+                missing_msg = (
+                    "❌ **缺少核心依赖库 `openai`**\n\n"
+                    "未在当前 QGIS Python 环境中检测到 `openai` 库，Agent 无法启动。\n\n"
+                    "💡 **解决方法**：\n"
+                    "1. 请打开插件顶部工具栏【设置 (⚙️)】，点击【安装/检查依赖】自动安装。\n"
+                    "2. 或在 QGIS Python 控制台 / 终端中执行：\n"
+                    "```bash\npip install openai\n```"
                 )
+                self.append_message_signal.emit("SYSTEM", missing_msg)
+                self._emit_agent_message(missing_msg)
+                from .run_state import FAILED
+                self._run_status_override = FAILED
+                self._run_status_reason = "缺少核心依赖库 openai"
                 return False
 
         from qgis.core import QgsSettings
@@ -436,7 +549,17 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
             return True
         else:
             self.logger.error("DeepSeek API Key not configured in Settings.")
-            self.append_message_signal.emit("SYSTEM", "Error: DeepSeek API Key not configured. Please open Settings (⚙️).")
+            unconfigured_msg = (
+                "⚠️ **未配置 API Key**\n\n"
+                "检测到尚未配置 DeepSeek API Key，Agent 无法向大模型发起对话。\n\n"
+                "💡 **解决方法**：\n"
+                "请点击插件顶部工具栏的【设置 (⚙️)】按钮，输入您的 API Key 并保存后再试。"
+            )
+            self.append_message_signal.emit("SYSTEM", unconfigured_msg)
+            self._emit_agent_message(unconfigured_msg)
+            from .run_state import FAILED
+            self._run_status_override = FAILED
+            self._run_status_reason = "未配置 DeepSeek API Key"
             return False
 
     def _record_llm_usage(
@@ -595,6 +718,7 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
         return False
 
     def run(self):
+        self._turn_messages_start_idx = len(self.messages)
         if not getattr(self, "client", None) and not self._init_client():
             self.logger.error("Client not initialized. API Key missing.")
             self.finished_signal.emit()
@@ -706,6 +830,7 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
             cancelled_content,
         )
         request_growth_start = len(self.messages)
+        self._turn_messages_start_idx = len(self.messages)
         try:
             from .request_profile import detect_task_domains
 
@@ -834,6 +959,12 @@ class HarnessThread(HarnessProgressMixin, HarnessMemoryArtifactsMixin, HarnessEx
                         "SYSTEM",
                         message + "\nThe agent stopped this turn without executing additional tools.",
                     )
+                    user_friendly_msg = self._format_llm_exception_for_user(e)
+                    self._emit_agent_message(user_friendly_msg)
+                    from .run_state import FAILED
+                    self._run_status_override = FAILED
+                    self._run_status_reason = str(e)
+                    self._sync_metro_progress("failed", "大模型接口请求失败")
                     self._write_artifact_result(message, ok=False)
                     break
                 self._record_llm_usage(

@@ -192,11 +192,10 @@ class HarnessProgressMixin:
                         )
         except (ImportError, AttributeError, RuntimeError, TypeError):
             pass
-        last_error = ""
-        last_tool = ""
-        # Check the very latest tool result first
+        turn_start = getattr(self, "_turn_messages_start_idx", 0)
+        current_turn_msgs = self.messages[turn_start:] if turn_start < len(self.messages) else []
         latest_tool_msg = None
-        for m in reversed(self.messages):
+        for m in reversed(current_turn_msgs):
             if m.get("role") == "tool":
                 latest_tool_msg = m
                 break
@@ -204,13 +203,26 @@ class HarnessProgressMixin:
         latest_content = str(latest_tool_msg.get("content") or "") if latest_tool_msg else ""
         latest_is_err = any(k in latest_content.lower() for k in ["error", "exception", "failed", "traceback", "not found"])
 
+        last_error = ""
+        last_tool = ""
         if latest_is_err:
             last_tool = latest_tool_msg.get("name", "工具")
             last_error = latest_content
-        else:
-            # The latest tool actually succeeded! Do not surface ancient already-resolved errors.
-            last_tool = latest_tool_msg.get("name", "任务执行") if latest_tool_msg else ""
+        elif latest_tool_msg:
+            # The latest tool in THIS turn actually succeeded! Do not surface ancient already-resolved errors.
+            last_tool = latest_tool_msg.get("name", "任务执行")
             last_error = ""
+
+        if not last_tool:
+            lines = [
+                "⚠️ **当前任务未能自动完成（已安全暂停）**",
+                "",
+                "Agent 在当前轮次未能顺利获得大模型完整回复或工具执行计划。为防止产生无效输出，系统已安全暂停，并保留了当前工程状态与已生成的数据图层。",
+            ]
+            if reason:
+                lines.append(f"\n- **暂停原因**：{reason}")
+            lines.append("\n💡 **建议操作**：您可以补充更具体的指令或重试；若频繁出现，请检查大模型网络连接或账户额度。")
+            return "\n".join(lines)
         
         lines = [
             "⚠️ **当前任务未能自动完成（已安全暂停）**",
