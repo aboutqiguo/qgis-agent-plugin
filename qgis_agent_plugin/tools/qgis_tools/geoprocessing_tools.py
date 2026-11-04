@@ -1,25 +1,42 @@
 import processing
-from qgis.core import QgsVectorLayer, QgsProject, QgsCoordinateReferenceSystem
+from qgis.core import (
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsProject,
+    QgsVectorLayer,
+)
 
 def _crs_guard(layer: QgsVectorLayer) -> QgsVectorLayer:
     """
     CRS Guard (Data Digestion Agent): 
     Checks if the layer uses a geographic CRS (e.g. WGS84).
-    If it does, auto-reprojects it to Pseudo-Mercator (EPSG:3857) to ensure physical math calculations (like buffer distance) are correct.
+    If it does, auto-reprojects it to a local UTM CRS selected from the
+    layer centroid. Polar/out-of-UTM data falls back to EPSG:6933.
     """
     crs = layer.crs()
     if crs.isGeographic():
-        print(f"[CRS Guard] Warning: Layer '{layer.name()}' uses Geographic CRS ({crs.authid()}). Auto-reprojecting to EPSG:3857 for physical calculation.")
+        center = layer.extent().center()
+        if crs.authid() != "EPSG:4326":
+            transform = QgsCoordinateTransform(crs, QgsCoordinateReferenceSystem("EPSG:4326"), QgsProject.instance())
+            center = transform.transform(center)
+        lon, lat = center.x(), center.y()
+        if -80.0 <= lat <= 84.0:
+            zone = max(1, min(60, int((lon + 180.0) // 6.0) + 1))
+            epsg = (32600 if lat >= 0 else 32700) + zone
+        else:
+            epsg = 6933
+        target_crs = QgsCoordinateReferenceSystem(f"EPSG:{epsg}")
+        print(f"[CRS Guard] Reprojecting geographic layer '{layer.name()}' to {target_crs.authid()} for metric analysis.")
         import processing.core.Processing
         processing.core.Processing.Processing.initialize()
         params = {
             'INPUT': layer,
-            'TARGET_CRS': QgsCoordinateReferenceSystem('EPSG:3857'),
+            'TARGET_CRS': target_crs,
             'OUTPUT': 'memory:'
         }
         result = processing.run("native:reprojectlayer", params)
         out_layer = result['OUTPUT']
-        out_layer.setName(f"{layer.name()}_3857")
+        out_layer.setName(f"{layer.name()}_{target_crs.authid().replace(':', '_')}")
         return out_layer
     return layer
 
@@ -49,7 +66,7 @@ def buffer(layer: QgsVectorLayer, distance: float, output_path: str = "memory:")
         from .io_tools import load_vector_layer
         return load_vector_layer(out_layer)
         
-    if isinstance(out_layer, QgsVectorLayer):
+    if (isinstance(QgsVectorLayer, type) and isinstance(out_layer, QgsVectorLayer)) or hasattr(out_layer, "setName"):
         out_layer.setName(f"{layer.name()}_buffered")
         QgsProject.instance().addMapLayer(out_layer)
         
@@ -59,10 +76,26 @@ def clip(input_layer: QgsVectorLayer, overlay_layer: QgsVectorLayer, output_path
     """Clips the input layer with the overlay layer."""
     import processing.core.Processing
     processing.core.Processing.Processing.initialize()
+
+    overlay_to_use = overlay_layer
+    if (
+        hasattr(input_layer, "crs")
+        and hasattr(overlay_layer, "crs")
+        and input_layer.crs().isValid()
+        and overlay_layer.crs().isValid()
+        and input_layer.crs() != overlay_layer.crs()
+    ):
+        reproject_params = {
+            'INPUT': overlay_layer,
+            'TARGET_CRS': input_layer.crs(),
+            'OUTPUT': 'memory:'
+        }
+        reproject_result = processing.run("native:reprojectlayer", reproject_params)
+        overlay_to_use = reproject_result['OUTPUT']
     
     params = {
         'INPUT': input_layer,
-        'OVERLAY': overlay_layer,
+        'OVERLAY': overlay_to_use,
         'OUTPUT': output_path
     }
     result = processing.run("native:clip", params)
@@ -72,16 +105,22 @@ def clip(input_layer: QgsVectorLayer, overlay_layer: QgsVectorLayer, output_path
         from .io_tools import load_vector_layer
         return load_vector_layer(out_layer)
         
-    if isinstance(out_layer, QgsVectorLayer):
-        out_layer.setName(f"{input_layer.name()}_clipped")
-        QgsProject.instance().addMapLayer(out_layer)
+    try:
+        if isinstance(QgsVectorLayer, type) and isinstance(out_layer, QgsVectorLayer):
+            out_layer.setName(f"{input_layer.name()}_clipped")
+            if hasattr(QgsProject.instance(), "addMapLayer"):
+                QgsProject.instance().addMapLayer(out_layer)
+    except Exception:
+        pass
         
     return out_layer
 
 def clip_raster(input_layer, mask_layer, output_path: str = "TEMPORARY_OUTPUT", validate_output: bool = True, min_valid_percent: float = 0.01):
     """
     Clips a raster layer using a vector mask layer.
-    Strictly preserves data type, NoData values, and clones the visual renderer.
+    Preserves the input data type. Existing NoData is retained; when the input
+    has no declared NoData, an alpha mask is used instead of inventing a value
+    that may collide with valid pixels.
     """
     import processing
     from qgis.core import QgsProject, QgsRasterLayer
@@ -102,21 +141,12 @@ def clip_raster(input_layer, mask_layer, output_path: str = "TEMPORARY_OUTPUT", 
         'OUTPUT': output_path
     }
     
-    # Ensure NODATA is ALWAYS set so exterior pixels are ignored in downstream analysis!
+    # Never invent an integer NoData value: every candidate may be valid data.
     import math
-    from qgis.core import Qgis
     if nodata_val is not None and not math.isnan(nodata_val):
         params['NODATA'] = nodata_val
     else:
-        # User explicitly noted 0 could be valid reflectance. 
-        # We dynamically pick a safe out-of-bounds NoData value based on the native data type.
-        dtype = provider.dataType(1)
-        if dtype == Qgis.DataType.Byte:
-            params['NODATA'] = 255
-        elif dtype in [Qgis.DataType.UInt16, Qgis.DataType.UInt32]:
-            params['NODATA'] = 65535
-        else:
-            params['NODATA'] = -9999
+        params['ALPHA_BAND'] = True
         
     result = processing.run("gdal:cliprasterbymasklayer", params)
     out_path = result['OUTPUT']
@@ -135,7 +165,7 @@ def clip_raster(input_layer, mask_layer, output_path: str = "TEMPORARY_OUTPUT", 
     out_layer = load_raster_layer(out_path, f"{input_layer.name()}_clipped")
     if out_layer.isValid():
         
-        # Clone the renderer to perfectly preserve MinMax statistics and RGB mappings!
+        # Reuse the renderer configuration; output statistics may still differ.
         if input_layer.renderer():
             out_layer.setRenderer(input_layer.renderer().clone())
             out_layer.triggerRepaint()

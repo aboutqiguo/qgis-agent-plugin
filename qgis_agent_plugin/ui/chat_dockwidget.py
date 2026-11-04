@@ -1,6 +1,37 @@
-from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout, QMessageBox, QInputDialog, QTextEdit, QLabel, QSizePolicy, QMenu, QAction, QApplication
+from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout, QMessageBox, QInputDialog, QTextEdit, QLabel, QSizePolicy, QMenu, QAction, QApplication, QProgressBar, QDialog, QDialogButtonBox, QPlainTextEdit
 from qgis.PyQt.QtCore import pyqtSignal, Qt, QPoint
 from qgis.PyQt.QtGui import QPalette
+
+
+class AgentRequestDialog(QDialog):
+    """A resizable prompt dialog that preserves readable, wrapped questions."""
+
+    def __init__(self, question, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Agent Request")
+        self.setMinimumSize(680, 360)
+        self.resize(820, 500)
+
+        layout = QVBoxLayout(self)
+        question_label = QLabel(str(question or ""), self)
+        question_label.setWordWrap(True)
+        question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        question_label.setStyleSheet("padding: 4px 2px;")
+        layout.addWidget(question_label)
+
+        self.answer_input = QPlainTextEdit(self)
+        self.answer_input.setPlaceholderText("请输入回复…")
+        self.answer_input.setMinimumHeight(180)
+        layout.addWidget(self.answer_input, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def answer(self):
+        return self.answer_input.toPlainText().strip()
+
 
 class AutoExpandingTextEdit(QTextEdit):
     returnPressed = pyqtSignal()
@@ -8,7 +39,7 @@ class AutoExpandingTextEdit(QTextEdit):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setPlaceholderText("在这里输入您的 GIS 任务... (支持 Ctrl+V 粘贴截图)")
+        self.setPlaceholderText("发消息或创建任务, / 调用指令, @ 文件或对话")
         self.document().contentsChanged.connect(self.adjust_height)
         self.document().contentsChanged.connect(self.check_mention)
         self.adjust_height()
@@ -124,6 +155,7 @@ class ChatDockWidget(QDockWidget):
     send_message_signal = pyqtSignal(str, str, str, str) # text, model, effort, mode
     action_panel_signal = pyqtSignal(str) # "APPROVE" or "REJECT"
     stop_agent_signal = pyqtSignal()
+    operation_progress_signal = pyqtSignal(dict)
     
     def __init__(self, parent=None):
         super().__init__("QGIS AI Agent Copilot", parent)
@@ -141,42 +173,76 @@ class ChatDockWidget(QDockWidget):
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(10)
         
-        # Model, Effort, Mode (Antigravity Style Button Menus)
-        self.current_model = "deepseek-v4-flash"
-        self.current_effort = "High"
-        self.current_mode = "PLAN"
-        
-        self.model_btn = QPushButton("V4 极速版 (常规) ⌃")
-        self.model_btn.setStyleSheet("QPushButton { background: transparent; font-size: 13px; font-weight: 500; padding: 4px; border: none; text-align: left; }")
-        self.model_menu = QMenu(self)
-        self.model_menu.setStyleSheet("QMenu { border-radius: 6px; padding: 4px; font-size: 13px; } QMenu::item { padding: 6px 24px 6px 12px; border-radius: 4px; }")
-        
-        actions = [
-            ("V4 极速版 (常规)", "deepseek-v4-flash", "High"),
-            ("V4 极速版 (极限)", "deepseek-v4-flash", "Max"),
-            ("V4 旗舰版 (常规)", "deepseek-v4-pro", "High"),
-            ("V4 旗舰版 (极限)", "deepseek-v4-pro", "Max"),
-            ("V4 极速版 (关闭思考)", "deepseek-v4-flash", "Disabled")
+        # Available Models: (display_name, model_id, badge_text)
+        self.AVAILABLE_MODELS = [
+            ("DeepSeek-V4.1-Flash", "deepseek-v4-flash", "1017"),
+            ("DeepSeek-V4.1-Pro", "deepseek-v4-pro", "Pro"),
+            ("DeepSeek-Chat", "deepseek-chat", "Vision"),
+            ("DeepSeek-Reasoner", "deepseek-reasoner", "R1"),
         ]
-        for text, m_id, e_id in actions:
-            action = QAction(text, self)
-            action.triggered.connect(lambda checked, t=text, m=m_id, e=e_id: self.update_model_selection(t, m, e))
-            self.model_menu.addAction(action)
+
+        # Available Efforts: (display_name, effort_id, description)
+        self.AVAILABLE_EFFORTS = [
+            ("Disabled", "Disabled", "关闭思考"),
+            ("Low", "Low", "轻度思考"),
+            ("High", "High", "常规思考"),
+            ("Max", "Max", "极限思考"),
+        ]
+
+        from qgis.core import QgsSettings
+        s = QgsSettings()
+        self.current_model = s.value("qgis_agent/selected_model", "deepseek-v4-flash")
+        self.current_effort = s.value("qgis_agent/selected_effort", "High")
+        from ..core.mode_state import normalize_mode, MODE_WORKSPACE_WRITE
+        self.current_mode = normalize_mode(s.value("qgis_agent/selected_mode", MODE_WORKSPACE_WRITE))
+
+        # Dashboard metrics storage
+        self._db_turns = 0
+        self._db_steps = 0
+        self._db_speed = 185
+        self._db_total_tokens = 0
+        self._db_cache_rate = 99
+        self._db_ctx_percent = 28
+
+        # Model & Effort Capsule Button (DeepSeek Style)
+        self.model_btn = QPushButton()
+        self.model_btn.setObjectName("modelCapsuleBtn")
+        self.model_btn.setStyleSheet("""
+            QPushButton#modelCapsuleBtn {
+                background-color: #f1f3f7;
+                color: #374151;
+                border: 1px solid #e5e7eb;
+                border-radius: 13px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton#modelCapsuleBtn:hover {
+                background-color: #e5e7eb;
+                border-color: #d1d5db;
+            }
+        """)
+        self._refresh_model_button_text()
         self.model_btn.clicked.connect(self.show_model_menu_upwards)
-        
-        self.mode_btn = QPushButton("安全计划 ⌃")
-        self.mode_btn.setStyleSheet(self.model_btn.styleSheet())
-        self.mode_menu = QMenu(self)
-        self.mode_menu.setStyleSheet(self.model_menu.styleSheet())
-        
-        mode_actions = [
-            ("安全计划 (推荐)", "PLAN"),
-            ("自动执行 (高风险)", "WORK")
-        ]
-        for text, m_id in mode_actions:
-            action = QAction(text, self)
-            action.triggered.connect(lambda checked, t=text, m=m_id: self.update_mode_selection(t, m))
-            self.mode_menu.addAction(action)
+
+        # Mode / Permission Button
+        self.mode_btn = QPushButton()
+        self.mode_btn.setObjectName("modeBtn")
+        self.mode_btn.setStyleSheet("""
+            QPushButton#modeBtn {
+                background: transparent;
+                font-size: 12px;
+                color: #374151;
+                font-weight: 500;
+                padding: 4px 6px;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton#modeBtn:hover {
+                background-color: rgba(0, 0, 0, 0.05);
+            }
+        """)
+        self._refresh_mode_button_text()
         self.mode_btn.clicked.connect(self.show_mode_menu_upwards)
         
         # Top Tab & Settings Bar
@@ -286,6 +352,50 @@ class ChatDockWidget(QDockWidget):
         self.status_label.setStyleSheet("color: palette(mid); font-size: 12px; font-style: italic;")
         self.status_label.hide()
         self.layout.addWidget(self.status_label)
+
+        # Long-running acquisition progress. Unknown server-side duration uses
+        # an indeterminate bar; byte/chunk based work shows a real percentage.
+        self.operation_progress_widget = QWidget()
+        self.operation_progress_layout = QVBoxLayout(self.operation_progress_widget)
+        self.operation_progress_layout.setContentsMargins(0, 0, 0, 2)
+        self.operation_progress_layout.setSpacing(4)
+        self.operation_progress_header = QHBoxLayout()
+        self.operation_progress_title = QLabel("")
+        self.operation_progress_title.setStyleSheet("font-size: 12px; font-weight: 600; color: palette(text);")
+        self.operation_progress_percent = QLabel("")
+        self.operation_progress_percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.operation_progress_percent.setStyleSheet("font-size: 11px; color: palette(mid);")
+        self.operation_progress_header.addWidget(self.operation_progress_title, 1)
+        self.operation_progress_header.addWidget(self.operation_progress_percent)
+        self.operation_progress_layout.addLayout(self.operation_progress_header)
+        self.operation_progress_stage = QLabel("")
+        self.operation_progress_stage.setWordWrap(True)
+        self.operation_progress_stage.setStyleSheet("font-size: 11px; color: palette(mid);")
+        self.operation_progress_layout.addWidget(self.operation_progress_stage)
+        from .metro_progress import MetroStationWidget
+        self.metro_widget = MetroStationWidget()
+        self.metro_widget.hide()
+        self.operation_progress_layout.addWidget(self.metro_widget)
+
+        self.operation_progress_bar = QProgressBar()
+        self.operation_progress_bar.setFixedHeight(8)
+        self.operation_progress_bar.setTextVisible(False)
+        self.operation_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid palette(mid);
+                border-radius: 3px;
+                background: palette(base);
+            }
+            QProgressBar::chunk {
+                border-radius: 2px;
+                background-color: palette(highlight);
+            }
+        """)
+        self.operation_progress_layout.addWidget(self.operation_progress_bar)
+        self.operation_progress_widget.hide()
+        self._operation_progress_id = ""
+        self.operation_progress_signal.connect(self.set_operation_progress)
+        self.layout.addWidget(self.operation_progress_widget)
         
         # Premium Input Area
         from qgis.PyQt.QtWidgets import QFrame
@@ -324,25 +434,43 @@ class ChatDockWidget(QDockWidget):
         self.add_btn.setToolTip("添加附件或提及数据 (@)")
         
         self.bottom_input_layout.addWidget(self.add_btn)
-        self.bottom_input_layout.addWidget(self.model_btn)
         self.bottom_input_layout.addWidget(self.mode_btn)
         
         self.bottom_input_layout.addStretch()
         
+        self.bottom_input_layout.addWidget(self.model_btn)
+        
         self.stop_button = QPushButton("⏸️")
         self.stop_button.setFixedSize(32, 32)
         self.stop_button.setStyleSheet("""
-            QPushButton { background-color: #dc3545; color: white; border-radius: 16px; font-size: 14px; }
+            QPushButton { background-color: #dc3545; color: white; border-radius: 16px; font-size: 14px; border: none; }
             QPushButton:hover { background-color: #bb2d3b; }
         """)
         self.stop_button.clicked.connect(self.stop_agent)
         self.stop_button.hide()
         
-        self.send_button = QPushButton("➤")
+        self.send_button = QPushButton("↑")
+        self.send_button.setObjectName("sendBtn")
         self.send_button.setFixedSize(32, 32)
         self.send_button.setStyleSheet("""
-            QPushButton { background-color: #0d6efd; color: white; border-radius: 16px; font-size: 16px; font-weight: bold; }
-            QPushButton:hover { background-color: #0b5ed7; }
+            QPushButton#sendBtn {
+                background-color: #818cf8;
+                color: #ffffff;
+                border-radius: 16px;
+                font-size: 18px;
+                font-weight: bold;
+                border: none;
+            }
+            QPushButton#sendBtn:hover {
+                background-color: #6366f1;
+            }
+            QPushButton#sendBtn:pressed {
+                background-color: #4f46e5;
+            }
+            QPushButton#sendBtn:disabled {
+                background-color: #e0e7ff;
+                color: #c7d2fe;
+            }
         """)
         self.send_button.clicked.connect(self.send_message)
         
@@ -352,30 +480,243 @@ class ChatDockWidget(QDockWidget):
         
         self.input_frame.setLayout(self.input_layout)
         self.layout.addWidget(self.input_frame)
+
+        # Bottom Dashboard (Telemetry & Resource Metrics Bar)
+        self.dashboard_frame = QWidget()
+        self.dashboard_layout = QHBoxLayout(self.dashboard_frame)
+        self.dashboard_layout.setContentsMargins(6, 2, 6, 2)
+        self.dashboard_layout.setSpacing(14)
+
+        self.stat_turns_label = QLabel("⏱️ 0 轮 0 步 · 185 tok/s")
+        self.stat_turns_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self.stat_turns_label.setToolTip("当前会话已执行的对话轮数、工具步数及实时生成速率")
+
+        self.stat_cache_label = QLabel("💾 0 tok · 缓存命中 99%")
+        self.stat_cache_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self.stat_cache_label.setToolTip("累计消耗 Token 总量与 DeepSeek 提示词缓存命中率")
+
+        self.stat_ctx_label = QLabel("◌ 28%")
+        self.stat_ctx_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self.stat_ctx_label.setToolTip("当前上下文窗口占用比例")
+
+        self.dashboard_layout.addStretch()
+        self.dashboard_layout.addWidget(self.stat_turns_label)
+        self.dashboard_layout.addWidget(self.stat_cache_label)
+        self.dashboard_layout.addWidget(self.stat_ctx_label)
+        self.dashboard_layout.addStretch()
+
+        self.layout.addWidget(self.dashboard_frame)
+        self._init_dashboard_metrics()
         
         self.main_widget.setLayout(self.layout)
         self.setWidget(self.main_widget)
         
-    def show_model_menu_upwards(self):
-        pos = self.model_btn.mapToGlobal(QPoint(0, 0))
-        pos.setY(pos.y() - self.model_menu.sizeHint().height() - 5)
-        self.model_menu.exec_(pos)
+    def _refresh_model_button_text(self):
+        curr_model_tuple = next((m for m in self.AVAILABLE_MODELS if m[1] == self.current_model), self.AVAILABLE_MODELS[0])
+        badge = curr_model_tuple[2]
+        badge_str = f" {badge} " if badge else " "
+        self.model_btn.setText(f"{curr_model_tuple[0]}{badge_str}{self.current_effort} ˄")
 
-    def update_model_selection(self, text, model_id, effort_id):
-        self.model_btn.setText(f"{text} ⌃")
+    def _refresh_mode_button_text(self):
+        from ..core.mode_state import (
+            normalize_mode,
+            MODE_WORKSPACE_WRITE,
+            MODE_DISPLAY_CONFIG,
+        )
+        norm = normalize_mode(self.current_mode)
+        cfg = MODE_DISPLAY_CONFIG.get(norm, MODE_DISPLAY_CONFIG[MODE_WORKSPACE_WRITE])
+        self.mode_btn.setText(f"{cfg['icon']} {cfg['text']} ˅")
+
+    def show_model_menu_upwards(self):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                padding: 6px;
+                font-size: 13px;
+                color: #1f2937;
+            }
+            QMenu::item {
+                padding: 8px 32px 8px 12px;
+                border-radius: 6px;
+            }
+            QMenu::item:selected {
+                background-color: #f3f4f6;
+            }
+        """)
+
+        # 1. Model Submenu (模型独立选择)
+        curr_model_tuple = next((m for m in self.AVAILABLE_MODELS if m[1] == self.current_model), self.AVAILABLE_MODELS[0])
+        badge_str = f" {curr_model_tuple[2]}" if curr_model_tuple[2] else ""
+        model_action_title = f"模型         {curr_model_tuple[0]}{badge_str}"
+        model_menu = menu.addMenu(model_action_title)
+        model_menu.setStyleSheet(menu.styleSheet())
+
+        for name, m_id, b_text in self.AVAILABLE_MODELS:
+            item_text = f"{name} {b_text}" if b_text else name
+            action = QAction(item_text, self)
+            action.setCheckable(True)
+            action.setChecked(m_id == self.current_model)
+            action.triggered.connect(lambda checked, mid=m_id: self.update_model_selection(mid))
+            model_menu.addAction(action)
+
+        # 2. Effort Submenu (思考深度 / 推理等级独立选择)
+        effort_action_title = f"推理等级     {self.current_effort}"
+        effort_menu = menu.addMenu(effort_action_title)
+        effort_menu.setStyleSheet(menu.styleSheet())
+
+        for name, e_id, desc in self.AVAILABLE_EFFORTS:
+            action = QAction(f"{name} ({desc})", self)
+            action.setCheckable(True)
+            action.setChecked(e_id == self.current_effort)
+            action.triggered.connect(lambda checked, eid=e_id: self.update_effort_selection(eid))
+            effort_menu.addAction(action)
+
+        from qgis.PyQt.QtCore import QPoint
+        pos = self.model_btn.mapToGlobal(QPoint(0, 0))
+        pos.setY(pos.y() - menu.sizeHint().height() - 5)
+        menu.exec_(pos)
+
+    def update_model_selection(self, model_id):
         self.current_model = model_id
+        from qgis.core import QgsSettings
+        QgsSettings().setValue("qgis_agent/selected_model", model_id)
+        self._refresh_model_button_text()
+
+    def update_effort_selection(self, effort_id):
         self.current_effort = effort_id
+        from qgis.core import QgsSettings
+        QgsSettings().setValue("qgis_agent/selected_effort", effort_id)
+        self._refresh_model_button_text()
 
     def show_mode_menu_upwards(self):
-        pos = self.mode_btn.mapToGlobal(QPoint(0, 0))
-        pos.setY(pos.y() - self.mode_menu.sizeHint().height() - 5)
-        self.mode_menu.exec_(pos)
+        from ..core.mode_state import (
+            normalize_mode,
+            MODE_READ_ONLY,
+            MODE_WORKSPACE_WRITE,
+            MODE_FULL_ACCESS,
+        )
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                padding: 6px;
+                font-size: 13px;
+                color: #1f2937;
+            }
+            QMenu::item {
+                padding: 8px 32px 8px 12px;
+                border-radius: 6px;
+            }
+            QMenu::item:selected {
+                background-color: #f3f4f6;
+            }
+        """)
 
-    def update_mode_selection(self, text, mode_id):
-        # Extract just the prefix for the button text
-        short_text = text.split(" ")[0]
-        self.mode_btn.setText(f"{short_text} ⌃")
+        norm_curr = normalize_mode(self.current_mode)
+        mode_actions = [
+            ("🛡 仅可查看", MODE_READ_ONLY),
+            ("🛡 工作区内修改", MODE_WORKSPACE_WRITE),
+            ("🛡 完全权限", MODE_FULL_ACCESS),
+        ]
+        for label, m_id in mode_actions:
+            is_selected = (m_id == norm_curr)
+            display_text = f"{label:<14}   ✓" if is_selected else label
+            action = QAction(display_text, self)
+            action.triggered.connect(lambda checked, m=m_id: self.update_mode_selection(m))
+            menu.addAction(action)
+
+        from qgis.PyQt.QtCore import QPoint
+        pos = self.mode_btn.mapToGlobal(QPoint(0, 0))
+        pos.setY(pos.y() - menu.sizeHint().height() - 5)
+        menu.exec_(pos)
+
+    def update_mode_selection(self, mode_id):
         self.current_mode = mode_id
+        from qgis.core import QgsSettings
+        QgsSettings().setValue("qgis_agent/selected_mode", mode_id)
+        self._refresh_mode_button_text()
+
+    def update_dashboard(self, turns=None, steps=None, speed=None, total_tokens=None, cache_rate=None, ctx_percent=None):
+        if turns is not None:
+            self._db_turns = turns
+        if steps is not None:
+            self._db_steps = steps
+        if speed is not None:
+            self._db_speed = speed
+        if total_tokens is not None:
+            self._db_total_tokens = total_tokens
+        if cache_rate is not None:
+            self._db_cache_rate = cache_rate
+        if ctx_percent is not None:
+            self._db_ctx_percent = ctx_percent
+
+        tok = self._db_total_tokens
+        if tok >= 1_000_000:
+            tok_str = f"{tok / 1_000_000:.1f}M"
+        elif tok >= 1_000:
+            tok_str = f"{tok / 1_000:.1f}k"
+        else:
+            tok_str = str(tok)
+
+        self.stat_turns_label.setText(f"⏱️ {self._db_turns} 轮 {self._db_steps} 步 · {self._db_speed} tok/s")
+        self.stat_cache_label.setText(f"💾 {tok_str} tok · 缓存命中 {self._db_cache_rate}%")
+        self.stat_ctx_label.setText(f"◌ {self._db_ctx_percent}%")
+
+    def on_metrics_updated(self, metrics: dict):
+        if not isinstance(metrics, dict):
+            return
+        speed = metrics.get("speed")
+        total = metrics.get("total_tokens")
+        hit_rate = metrics.get("cache_hit_rate")
+        ctx_pct = metrics.get("ctx_percent")
+        step = metrics.get("step")
+        steps = (self._db_steps + 1) if step is not None else None
+        self.update_dashboard(
+            steps=steps,
+            speed=speed,
+            total_tokens=total,
+            cache_rate=hit_rate,
+            ctx_percent=ctx_pct,
+        )
+
+    def _init_dashboard_metrics(self):
+        try:
+            from qgis.core import QgsProject
+            home = QgsProject.instance().homePath()
+            if home and os.path.exists(home):
+                from ..core.cache_metrics import get_summary
+                summary = get_summary(project_home=home)
+                self._db_total_tokens = int(summary.get("total_tokens") or 0)
+                cache_rate = summary.get("cache_hit_rate")
+                if cache_rate is not None:
+                    self._db_cache_rate = int(round(float(cache_rate) * 100))
+                else:
+                    self._db_cache_rate = 0
+            else:
+                self._db_total_tokens = 0
+                self._db_cache_rate = 0
+        except Exception:
+            self._db_total_tokens = 0
+            self._db_cache_rate = 0
+        self._db_turns = 0
+        self._db_steps = 0
+        self._db_ctx_percent = 0
+        self.update_dashboard()
+
+    def reset_for_new_project(self):
+        """Reset session dashboard and recompute metrics for the current project."""
+        self._db_turns = 0
+        self._db_steps = 0
+        self._db_speed = 0
+        self._db_total_tokens = 0
+        self._db_cache_rate = 0
+        self._db_ctx_percent = 0
+        self._init_dashboard_metrics()
 
     def switch_tab(self, index):
         self.stacked_widget.setCurrentIndex(index)
@@ -492,6 +833,63 @@ class ChatDockWidget(QDockWidget):
         self.input_frame.hide()
         self.action_widget.show()
         self.set_agent_status("⏳ Waiting for human approval...")
+
+    def set_operation_progress(self, event):
+        event = dict(event or {})
+        operation_id = str(event.get("operation_id") or event.get("tool_name") or "data_acquisition")
+        self._operation_progress_id = operation_id
+        title = str(event.get("title") or "数据获取")
+        stage = str(event.get("stage") or "处理中")
+        detail = str(event.get("detail") or "").strip()
+        stage_index = max(1, int(event.get("stage_index") or 1))
+        stage_count = max(stage_index, int(event.get("stage_count") or stage_index))
+        state = str(event.get("state") or "running")
+
+        self.operation_progress_title.setText(title)
+        stations = event.get("stations")
+        if stations:
+            self.metro_widget.set_stations(title, stations)
+            self.metro_widget.show()
+            self.operation_progress_bar.hide()
+            self.operation_progress_stage.hide()
+        else:
+            self.metro_widget.hide()
+            self.operation_progress_bar.show()
+            self.operation_progress_stage.show()
+
+        stage_text = f"阶段 {stage_index}/{stage_count} · {stage}"
+        if detail:
+            stage_text += f"\n{detail}"
+        self.operation_progress_stage.setText(stage_text)
+
+        percent = event.get("percent")
+        if percent is None and state == "running":
+            self.operation_progress_bar.setRange(0, 0)
+            self.operation_progress_percent.setText("处理中")
+        else:
+            value = 100 if state == "completed" else int(round(float(percent or 0)))
+            value = min(100, max(0, value))
+            self.operation_progress_bar.setRange(0, 100)
+            self.operation_progress_bar.setValue(value)
+            labels = {
+                "completed": "已完成",
+                "failed": "失败",
+                "cancelled": "已取消",
+            }
+            self.operation_progress_percent.setText(labels.get(state, f"{value}%"))
+
+        self.operation_progress_widget.show()
+        if state == "running":
+            self.stop_button.show()
+
+    def clear_operation_progress(self, operation_id=""):
+        if operation_id and operation_id != self._operation_progress_id:
+            return
+        self._operation_progress_id = ""
+        self.metro_widget.hide()
+        self.operation_progress_bar.setRange(0, 100)
+        self.operation_progress_bar.setValue(0)
+        self.operation_progress_widget.hide()
         
     def set_agent_status(self, status_text, is_running=True):
         if status_text:
@@ -549,13 +947,26 @@ class ChatDockWidget(QDockWidget):
             self.open_settings()
             if not s.value("qgis_agent/deepseek_api_key", ""):
                 return
-        
-        if has_image and not s.value("qgis_agent/glm_api_key", ""):
-            QMessageBox.warning(self, "Vision API Key Required", "Please configure your GLM API key before sending images.")
-            self.open_settings()
-            if not s.value("qgis_agent/glm_api_key", ""):
+
+        from ..utils.dependency_manager import check_module_installed, install_packages_in_qgis
+        if not check_module_installed("openai"):
+            reply = QMessageBox.question(
+                self,
+                "缺少核心依赖",
+                "检测到当前环境尚未安装核心依赖 'openai'，Agent 无法与大模型通信。\n\n是否立即自动为您安装？",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                QMessageBox.information(self, "正在安装", "正在后台自动安装 openai，请稍候...")
+                ok, msg = install_packages_in_qgis(["openai"])
+                if not ok:
+                    QMessageBox.critical(self, "安装失败", f"自动安装失败：\n{msg}\n\n建议在命令行运行：pip install openai")
+                    return
+                else:
+                    QMessageBox.information(self, "安装成功", "依赖 openai 安装成功！")
+            else:
                 return
-        
+
         if text or has_image:
             model = getattr(self, 'current_model', 'deepseek-v4-flash')
             effort = getattr(self, 'current_effort', 'High')
@@ -569,6 +980,8 @@ class ChatDockWidget(QDockWidget):
                 self.image_preview_label.hide()
             
             self.append_message("USER", display_text)
+            self._db_turns += 1
+            self.update_dashboard()
             self.input_field.clear()
             self.set_agent_status("✨ Agent is thinking...", is_running=True)
             self.send_message_signal.emit(text, model, effort, mode)
@@ -604,6 +1017,8 @@ class ChatDockWidget(QDockWidget):
                 "content": content
             })
         else:
+            self._db_steps += 1
+            self.update_dashboard()
             if not self._chat_blocks or self._chat_blocks[-1]["role"] != "SYSTEM_GROUP" or self._chat_blocks[-1].get("end_time") is not None:
                 self._chat_blocks.append({
                     "role": "SYSTEM_GROUP",
@@ -635,54 +1050,69 @@ class ChatDockWidget(QDockWidget):
         is_dark = base.lightness() < 128
         return {
             "text": text.name(),
-            "muted": "#adb5bd" if is_dark else "#6c757d",
-            "system": "#ced4da" if is_dark else "#495057",
-            "border": "#495057" if is_dark else "#dee2e6",
-            "link": "#4dabf7" if is_dark else "#0d6efd",
-            "agent": "#51cf66" if is_dark else "#198754",
-            "user": "#4dabf7" if is_dark else "#0d6efd",
-            "code_bg": "#2b3035" if is_dark else "#f8f9fa",
+            "muted": "#9ca3af" if is_dark else "#6b7280",
+            "system": "#cbd5e1" if is_dark else "#4b5563",
+            "border": "#374151" if is_dark else "#e5e7eb",
+            "link": "#60a5fa" if is_dark else "#2563eb",
+            "agent": "#38bdf8" if is_dark else "#1d4ed8",
+            "user": "#818cf8" if is_dark else "#4338ca",
+            "user_bg": "#1e293b" if is_dark else "#f3f4f6",
+            "user_border": "#334155" if is_dark else "#e5e7eb",
+            "pill_bg": "#262b32" if is_dark else "#f8f9fa",
+            "code_bg": "#1f242c" if is_dark else "#f3f4f6",
+            "code_text": "#f1f5f9" if is_dark else "#1f2937",
+            "table_header": "#2d333b" if is_dark else "#f1f5f9",
+            "table_alt": "#262b32" if is_dark else "#fcfdfe",
         }
             
     def render_chat(self):
         import time
         colors = self._theme_colors()
         html = ""
+        from .markdown_renderer import render_markdown_to_html
         for i, block in enumerate(self._chat_blocks):
-            if block["role"] in ("USER", "AGENT"):
-                role = block["role"]
+            if block["role"] == "USER":
                 content = block["content"]
-                color = colors["user"] if role == "USER" else colors["agent"]
-                icon = "👤" if role == "USER" else "🤖"
-                try:
-                    import markdown
-                    content = content.replace("- [ ]", "☐").replace("- [x]", "☑").replace("- [/]", "🔄")
-                    html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-                except Exception:
-                    html_content = content.replace('\n', '<br>')
-                
-                html += f"<div style='margin-bottom: 10px;'><b><span style='color: {color}; font-size: 14px;'>{icon} {role}</span></b><br><div style='color: {colors['text']}; margin-top: 5px;'>{html_content}</div></div>"
+                html_content = render_markdown_to_html(content, colors)
+                html += f"""
+                <div style='margin: 12px 0 10px 0; padding: 10px 14px; background-color: {colors["user_bg"]}; border-radius: 10px; border: 1px solid {colors["user_border"]};'>
+                    <div style='font-size: 11px; font-weight: bold; color: {colors["user"]}; margin-bottom: 4px;'>👤 您 (User)</div>
+                    <div style='color: {colors["text"]}; font-size: 13px; line-height: 1.5;'>{html_content}</div>
+                </div>
+                """
+
+            elif block["role"] == "AGENT":
+                content = block["content"]
+                html_content = render_markdown_to_html(content, colors)
+                html += f"""
+                <div style='margin: 12px 0 16px 0;'>
+                    <div style='font-size: 11.5px; font-weight: bold; color: {colors["agent"]}; margin-bottom: 6px;'>🤖 AI Agent</div>
+                    <div style='color: {colors["text"]}; font-size: 13px; line-height: 1.6;'>{html_content}</div>
+                </div>
+                """
                 
             elif block["role"] == "SYSTEM_GROUP":
                 if block.get("end_time"):
                     duration = max(1, int(block["end_time"] - block["start_time"]))
-                    time_str = f"Worked for {duration}s"
+                    time_str = f"🧠 思考与执行过程 · {duration}s"
                 else:
                     duration = max(1, int(time.time() - block["start_time"]))
-                    time_str = f"Working... ({duration}s)"
+                    time_str = f"⚡ 正在思考与调用工具... ({duration}s)"
                     
                 toggle_icon = "▶" if block["collapsed"] else "▼"
-                html += f"<div style='margin-bottom: 5px; margin-top: 10px;'><a href='toggle:{i}' style='color: {colors['muted']}; text-decoration: none; font-size: 13px; font-weight: bold;'>{toggle_icon} {time_str}</a></div>"
+                html += f"""
+                <div style='margin: 6px 0;'>
+                    <a href='toggle:{i}' style='display: inline-block; background-color: {colors["pill_bg"]}; color: {colors["muted"]}; border: 1px solid {colors["border"]}; border-radius: 13px; padding: 3px 10px; text-decoration: none; font-size: 11px; font-weight: 500;'>
+                        {toggle_icon} {time_str}
+                    </a>
+                </div>
+                """
                 
                 if not block["collapsed"]:
-                    html += f"<div style='margin-left: 10px; border-left: 3px solid {colors['border']}; padding-left: 10px; margin-bottom: 15px;'>"
+                    html += f"<div style='margin-left: 6px; border-left: 2px solid {colors['border']}; padding-left: 10px; margin-top: 4px; margin-bottom: 10px;'>"
                     for msg in block["messages"]:
-                        try:
-                            import markdown
-                            html_msg = markdown.markdown(msg, extensions=['tables', 'fenced_code'])
-                        except:
-                            html_msg = msg.replace('\n', '<br>')
-                        html += f"<div style='color: {colors['system']}; font-size: 12px; margin-bottom: 8px;'>{html_msg}</div>"
+                        html_msg = render_markdown_to_html(msg, colors)
+                        html += f"<div style='color: {colors['system']}; font-size: 11.5px; line-height: 1.5; margin-bottom: 6px;'>{html_msg}</div>"
                     html += "</div>"
                     
         scrollbar = self.chat_history.verticalScrollBar()
@@ -691,13 +1121,59 @@ class ChatDockWidget(QDockWidget):
         
         base_style = f"""
         <style>
-            body {{ color: {colors['text']}; }}
-            p, li, td, th {{ color: {colors['text']}; }}
-            a {{ color: {colors['link']}; }}
-            code, pre {{
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                font-size: 13px;
+                line-height: 1.6;
                 color: {colors['text']};
+                margin: 6px;
+            }}
+            p {{ margin: 6px 0; }}
+            ul, ol {{ margin: 6px 0; padding-left: 20px; }}
+            li {{ margin: 3px 0; }}
+            a {{ color: {colors['link']}; text-decoration: none; }}
+            a:hover {{ text-decoration: underline; }}
+            code {{
+                color: {colors['code_text']};
+                background-color: {colors['code_bg']};
+                padding: 2px 5px;
+                border-radius: 4px;
+                font-family: Consolas, "Courier New", monospace;
+                font-size: 12px;
+            }}
+            pre {{
                 background-color: {colors['code_bg']};
                 border: 1px solid {colors['border']};
+                border-radius: 6px;
+                padding: 8px 12px;
+                overflow-x: auto;
+                margin: 8px 0;
+            }}
+            pre code {{
+                padding: 0;
+                background: transparent;
+                border: none;
+            }}
+            table {{
+                border-collapse: collapse;
+                width: 100%;
+                margin: 10px 0;
+                font-size: 12px;
+            }}
+            th, td {{
+                border: 1px solid {colors['border']};
+                padding: 6px 10px;
+                text-align: left;
+            }}
+            th {{
+                background-color: {colors['table_header']};
+                font-weight: 600;
+            }}
+            blockquote {{
+                margin: 8px 0;
+                padding-left: 10px;
+                border-left: 3px solid {colors['link']};
+                color: {colors['muted']};
             }}
         </style>
         """
@@ -712,6 +1188,7 @@ class ChatDockWidget(QDockWidget):
     def on_agent_finished(self):
         import time
         self.set_agent_status("", is_running=False)
+        self.clear_operation_progress()
         if hasattr(self, '_chat_blocks') and self._chat_blocks and self._chat_blocks[-1]["role"] == "SYSTEM_GROUP":
             if self._chat_blocks[-1].get("end_time") is None:
                 self._chat_blocks[-1]["end_time"] = time.time()
@@ -720,8 +1197,9 @@ class ChatDockWidget(QDockWidget):
         
     def ask_human(self, question):
         self.set_agent_status("⏳ Agent is asking for your input...")
-        text, ok = QInputDialog.getMultiLineText(self, "Agent Request", question)
-        if ok and text:
+        dialog = AgentRequestDialog(question, self)
+        if dialog.exec_() == QDialog.Accepted and dialog.answer():
+            text = dialog.answer()
             self.append_message("USER (Reply)", text)
             self.set_agent_status("✨ Agent is thinking...", is_running=True)
             return text

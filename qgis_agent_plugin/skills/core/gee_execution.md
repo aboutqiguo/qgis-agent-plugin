@@ -1,20 +1,19 @@
 <skill>
 <name>gee_execution</name>
-<description>当任务涉及 Google Earth Engine (GEE) 数据获取、空间分析、云端计算与数据下载时，必须首先阅读此技能。</description>
+<description>Google Earth Engine 数据参数确认、云端处理、下载路由和结果验证。</description>
 
 <strict_rules>
-- **GEE Initialization**: ALWAYS use `from qgis_agent_plugin.bridges.gee_bridge import init_gee; init_gee()` at the start of your Earth Engine scripts. NEVER call `ee.Initialize()` directly and NEVER ask the user for their Project ID, as `init_gee()` reads it automatically from the user's settings!
-- **GEE Download Protocol (CRITICAL)**: To download an `ee.Image` from Google Earth Engine to the local disk, you are FORBIDDEN from manually writing `ee.batch.Export.image.toDrive` or using `image.getDownloadURL()`. `getDownloadURL` is only suitable for tiny direct downloads and has a strict 32MB response limit plus grid-dimension limits. You MUST ALWAYS use the high-level wrapper: `from qgis_agent_plugin.bridges.gee_bridge import GEEDownloader; dest_path = GEEDownloader.download_ee_object(ee_object=image, filename='output_name', dest_dir='C:/path', scale=30, region=roi_geometry, crs='EPSG:4326')`. This wrapper exports to Google Drive, downloads only small exports through the Google Drive API (`<=32MB` by default), falls back to local Google Drive Desktop sync for larger files or API/validation failures, and finally reports Google Drive manual download links if both automatic routes fail.
-- **GEE Payload Limit & Complex Geometries (CRITICAL)**: GEE API has a strict 10MB payload limit. If you have a highly complex local boundary layer (e.g. province/county) and need to download GEE imagery for it:
-  1. DO NOT convert the raw polygon into an `ee.Geometry.Polygon(coords)`. It will crash the API!
-  2. Extract the Bounding Box of the layer first: `bbox = geom.boundingBox()`. Create an `ee.Geometry.Rectangle([bbox.xMinimum(), bbox.yMinimum(), bbox.xMaximum(), bbox.yMaximum()])`.
-  3. Pass this Rectangle as the `region` to `GEEDownloader.download_ee_object`.
-  4. AFTER the raster is downloaded locally, use `processing.run('gdal:cliprasterbymasklayer', ...)` with your complex local SHP to crop the raster precisely. This utilizes Local computing power and saves Cloud payload!
-- **Sentinel-2 User Parameters (CRITICAL)**: For a generic Sentinel-2 request, NEVER assume the bands, date range, cloud threshold, scale, collection, or processing method. If the user did not specify them, call `ask_human` and ask for these parameters before downloading. Do not silently choose NDVI, RGB, summer dates, median composite, or cloud masking.
-- **Sentinel-2 Download Tool**: Prefer `run_gee_sentinel2_download_workflow` only after the user has explicitly confirmed `collection_id`, `start_date`, `end_date`, `bands`, `cloud_pct`, `scale`, `processing_method`, and output name. Set `user_confirmed_parameters=true` only after that confirmation.
-- **DEM User Parameters (CRITICAL)**: For a generic DEM request, NEVER assume the DEM dataset, scale/resolution, output CRS, output name, or load/display behavior. If any of these are missing, call `ask_human` before downloading. Prefer `run_gee_dem_download_workflow` after confirmation.
-- **Copernicus DEM GLO-30 (CRITICAL)**: `COPERNICUS/DEM/GLO30` is an `ee.ImageCollection`, not an `ee.Image`. NEVER use `ee.Image('COPERNICUS/DEM/GLO30')`. The tested pattern is `ee.ImageCollection('COPERNICUS/DEM/GLO30').mosaic().select('DEM')`, or use `run_gee_dem_download_workflow`.
-- **GEE Mosaicing/Compositing**: use `.mosaic()`, `.median()`, cloud-masked median, or least-cloudy scene only when that processing choice matches the user's confirmed requirement. Do not use `.first()` unless the user explicitly asks for a single least-cloudy/first scene and understands partial coverage risk.
-- **UI Feedback (Anti-Freeze Rule)**: During complex GEE computations or processing pipelines, you must not remain completely silent while waiting for server responses. Use `iface.messageBar().pushMessage("GEE Processing", "Computing composite... please wait", level=Qgis.MessageLevel.Info, duration=30)` to inform the user of the current stage, preventing them from thinking QGIS has crashed.
+- **初始化**：自定义 GEE 脚本仅使用 `from qgis_agent_plugin.bridges.gee_bridge import init_gee; init_gee()`，不要直接调用 `ee.Initialize()`，也不要再次向用户索取已在插件设置中保存的 Project ID。
+- **用户确认**：通用 Sentinel-2 请求不得默认日期、波段、云量、分辨率、collection、合成方法、输出名、输出 CRS 或是否加载。缺少任一关键参数时调用 `ask_human`。不得自行加入 NDVI、RGB 或云掩膜。
+- **Sentinel-2 工具**：参数明确后优先使用 `run_gee_sentinel2_download_workflow`，只有用户明确提供或批准全部参数时才能设置 `user_confirmed_parameters=true`。
+- **DEM 工具**：通用 DEM 请求缺少数据集、分辨率、输出名、输出 CRS 或是否加载时先调用 `ask_human`，确认后使用 `run_gee_dem_download_workflow`。
+- **Copernicus GLO-30**：`COPERNICUS/DEM/GLO30` 是 `ee.ImageCollection`，正确形式为 `ee.ImageCollection(...).mosaic().select('DEM')`。
+- **下载路由**：`GEEDownloader.download_ee_object` 先估算 Earth Engine direct download 的实际 32MB/网格维度限制；满足限制时尝试直接下载，超限或 direct 失败时改用批量导出到 Google Drive。Google Drive API 不使用 32MB 或 50MB 文件大小阈值，应以真实 API 请求结果决定是否回退。
+- **大范围导出**：复杂边界可用简化后的几何或 bbox 作为云端 export region，下载后再用插件栅格裁剪工具按本地边界精确裁剪。不要直接调用未经 Catalog 验证的 GDAL 算法。
+- **自动与人工回退**：批量导出完成后按本次唯一前缀和创建时间定位文件，先尝试 Drive API 流式下载；失败后可尝试已配置的 Drive Desktop 同步。两者都失败时返回 `awaiting_manual_download` 和准确文件信息，不得报告本地下载成功。
+- **完整性验证**：下载完成后验证文件可读、尺寸、地理范围、波段数和有效像元比例。损坏、全 NoData 或覆盖不足的影像不得进入后续分析。
+- **过程反馈**：下载工具会依次报告认证/查询、云端处理、本地下载、验证和加载阶段。有真实字节总量时显示百分比；GEE 云端处理没有可靠百分比时显示任务 ID、服务端状态和等待时长，不得编造完成比例或剩余时间。
+- **取消语义**：本地监控被停止不等于云端导出失败。若工具返回 `operation_cancelled` 且 `cloud_export_may_continue=true`，明确提示用户检查 Earth Engine Tasks；不得立即提交重复导出，也不得归因于认证或配额，除非工具返回相应错误。
+- **成功判定**：只能依据本次 GEE 工具结果和已验证的目标 GeoTIFF 判断成功。OSM 图层存在、项目可保存或 Drive 中任务处于 Running 都不能证明 GEE 本地下载完成。
 </strict_rules>
 </skill>

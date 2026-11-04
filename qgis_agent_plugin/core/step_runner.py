@@ -6,20 +6,6 @@ from .task_state import STATUS_FAILED, STATUS_PASSED, STATUS_RUNNING, StepVerifi
 from .verifier import verify_step
 
 
-NON_EXECUTION_TOOLS = {
-    "ask_human",
-    "submit_plan_for_approval",
-    "search_past_conversations",
-    "search_data_sources",
-    "create_data_acquisition_plan",
-    "search_skills",
-    "read_skill",
-    "query_pyqgis_doc",
-    "search_gee_api",
-    "search_gee_python_api",
-}
-
-
 @dataclass
 class StepGate:
     allowed: bool
@@ -53,10 +39,10 @@ class StepExecutionController:
     def begin_tool_call(self, tool_call_id: str, tool_name: str, args: Dict[str, Any]) -> StepGate:
         if not self.has_plan() or not is_execution_tool(tool_name):
             return StepGate(True)
-        if self.executed_tool_this_response:
+        if self.active_tool_call_id:
             return StepGate(
                 False,
-                "Planner/Verifier allows only one execution tool call per assistant response. Wait for verification before continuing.",
+                "The previous execution tool has not completed local verification yet.",
             )
 
         step = self.plan.active_step()
@@ -117,4 +103,17 @@ class StepExecutionController:
 
 
 def is_execution_tool(tool_name: str) -> bool:
-    return bool(tool_name and tool_name not in NON_EXECUTION_TOOLS)
+    if not tool_name:
+        return False
+    try:
+        from .tool_registry import CONTROL_TOOLS, get_tool_spec
+
+        if tool_name in CONTROL_TOOLS:
+            return False
+        spec = get_tool_spec(tool_name)
+        if spec is not None:
+            return not bool(spec.read_only)
+    except Exception:
+        pass
+    # Unknown tools are treated conservatively as execution tools.
+    return True

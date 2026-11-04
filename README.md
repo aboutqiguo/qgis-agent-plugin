@@ -1,300 +1,408 @@
-# QGIS AI Agent Copilot
+<div align="center">
 
-QGIS AI Agent Copilot 是一个面向 QGIS 的智能 GIS 助手插件。它将大语言模型、PyQGIS、QGIS Processing Toolbox、OpenStreetMap 和 Google Earth Engine 连接到 QGIS 内部，让用户可以用自然语言完成数据获取、空间分析、遥感处理、制图、项目保存与结果验证。
+# 🌏 QGIS AI Agent Copilot
 
-- 当前稳定版本：`v1.3.2`
-- 推荐 QGIS：`3.34 LTR` 或 `3.44`
-- 最低 QGIS：`3.28`
-- 项目仓库：[aboutqiguo/qgis-agent-plugin](https://github.com/aboutqiguo/qgis-agent-plugin)
-- 安装包：`qgis_agent_plugin_v1.3.2.zip`
+**让 QGIS 听懂自然语言 —— 基于 DeepSeek 原生多模态的 QGIS 智能 GIS 助手**
+
+*An AI Copilot for QGIS: natural-language geoprocessing, remote sensing, OSM / GEE data acquisition and cartography.*
+
+[![Version](https://img.shields.io/badge/version-v1.4.0-blue.svg)](https://github.com/aboutqiguo/qgis-agent-plugin/releases)
+[![QGIS](https://img.shields.io/badge/QGIS-3.28%20~%203.44-589632.svg?logo=qgis&logoColor=white)](https://qgis.org)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
+[![LLM](https://img.shields.io/badge/LLM-DeepSeek%20V4-4D6BFE.svg)](https://platform.deepseek.com)
+[![Tests](https://img.shields.io/badge/tests-140%20passed-brightgreen.svg)](#-开发与测试)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#-协议与致谢)
+
+[功能特性](#-核心特性) · [效果展示](#-应用效果) · [系统架构](#-系统架构) · [快速开始](#-快速开始) · [UI 介绍](#-界面介绍) · [使用示例](#-使用示例) · [更新日志](#-更新日志)
+
+![QGIS AI Agent 应用效果](docs/images/demo_osm_transport.jpg)
+
+</div>
+
+---
+
+## 📖 项目简介
+
+**QGIS AI Agent Copilot** 是一个运行在 QGIS 内部的智能体（Agent）插件。它把 **大语言模型（DeepSeek）**、**PyQGIS**、**QGIS Processing Toolbox（700+ 算法）**、**OpenStreetMap** 与 **Google Earth Engine** 串联起来，用户只需在侧边栏用中文描述任务，Agent 就会自动完成：
+
+> 理解意图 → 拆解计划 → 选择工具 → 执行处理 → 校验结果 → 加载渲染 → 保存工程 → 汇报总结
+
+与「让大模型写一段代码再手动粘贴」不同，本插件在 QGIS 中构建了完整的 **工具调用闭环**：64 个结构化原子工具、参数静态校验、PyQGIS 代码安全审查与自动修复、执行断点、结果核验与工程级记忆，尽可能让每一步都 **可执行、可验证、可恢复**。
+
+> [!WARNING]
+> **网络说明：Google Earth Engine（GEE）与 OpenStreetMap（OSM / Overpass / Nominatim）相关功能需要在可访问国际互联网的网络环境（VPN / 代理）下使用。**
+> 在中国大陆网络环境下，未开启 VPN 时 GEE 认证、影像下载、Google Drive 同步以及 OSM 边界 / 路网 / 要素下载均可能超时或失败。DeepSeek 对话、本地栅格 / 矢量分析、Processing 算法调用不受影响。
 
 ---
 
 ## ✨ 核心特性
 
-### 自然语言驱动 GIS 工作流
-
-- 将用户输入的自然语言任务拆解为可执行步骤。
-- 支持计划模式、任务审批、执行进度展示和任务日志归档。
-- 可调用 PyQGIS、QGIS Processing、OSM、GEE、文件读写和项目保存等工具。
-- 支持项目级记忆，记录数据路径、历史错误、修复经验和当前项目上下文。
-
-### OpenStreetMap 矢量数据获取
-
-- 行政边界：通过 Nominatim 获取县区、市、省等边界。
-- 道路网络：支持 OSMnx 下载、拓扑清理和加载。
-- 常用 OSM 要素：建筑物、POI、水系、水面、土地利用等。
-- 大范围数据：支持 bbox 分块下载、合并、保存和加载。
-- 输出验证：返回图层名、路径、几何类型、要素数量和标签信息，降低下载错层风险。
-
-### Google Earth Engine 数据获取
-
-- 支持 GEE 认证、Project ID 配置和任务导出。
-- 支持 Sentinel-2、DEM 等影像数据获取。
-- 支持 GEE 云端合成、裁剪、波段选择、云量筛选和本地加载。
-- Sentinel-2 泛化请求会主动询问数据集、时间、波段、云量、分辨率、处理方式和输出名，不再擅自生成 NDVI 或默认波段。
-- DEM 下载新增专用工作流，避免手写 GEE 代码造成数据集类型错误。
-
-### QGIS API 与 Processing 调用
-
-- 封装常用 QGIS API 和 Processing 调用。
-- 内置 Processing 算法目录数据库，可查询算法、参数和表达式函数。
-- 支持栅格裁剪、矢量裁剪、投影转换、空间索引、栅格验证和项目保存校验。
-- 内置常见 PyQGIS 错误修复器，覆盖颜色渲染、图层加载、GEE 导入路径、DEM 数据集加载等高频问题。
-
-### 稳定性与 token 优化
-
-- 压缩工具返回，减少重复图层扫描。
-- 优先使用高层工作流工具，减少临场生成长代码。
-- 对长耗时 GEE/OSM/Processing 任务提供阶段性反馈，降低 QGIS 被误判为卡死的概率。
-- 对下载后的 GeoTIFF 做可读性和有效像元验证，避免损坏文件进入后续分析。
+| 模块 | 能力 |
+|---|---|
+| 🧠 **自然语言 GIS 工作流** | 中文任务自动拆解为多步骤计划；支持计划审批、分步执行、断点续跑与失败诊断 |
+| 👁️ **DeepSeek 原生多模态** | 无需第三方视觉平台，直接解析截图、地图画布与图片附件，并对出图排版进行视觉评审 |
+| 🛰️ **遥感指数与分区统计** | 内置 `compute_raster_index` / `compute_raster_zonal_stats`，自动规避 UInt16 下溢，支持 NDVI / NDWI / MNDWI 等指数与掩膜分区统计 |
+| 🗺️ **OSM 矢量数据获取** | 行政边界、道路、铁路、建筑、POI、水系、土地利用；自动分块、去重、裁剪、重投影与分级符号化 |
+| 🌍 **GEE 云端遥感** | Sentinel-2、Copernicus DEM 下载工作流；Earth Engine 直连下载 / Google Drive 批量导出两级智能路由，断点续传与 GeoTIFF 完整性校验 |
+| ⚙️ **Processing 全量调用** | 本地构建 747 个算法 / 6262 个参数 / 391 个表达式函数的 Catalog；调用前 fail-closed 参数校验，自动解析图层名 → 数据源 |
+| 🛡️ **安全与权限** | 「仅可查看 / 工作区内修改 / 完全权限」三级模式；删除文件、执行任意代码、安装依赖等高危操作需人工审批 |
+| 🔧 **代码自愈** | PyQGIS 静态校验器拦截 QGIS 3.44 高频 API 幻觉（如 `bandName`、`setClassificationMode`、GDAL 类型误用），GDAL 临时数据集自动修复 |
+| 🚇 **任务里程碑进度** | 地铁线路图式进度条，中文节点、自动换行，实时展示每个步骤的完成 / 运行 / 失败状态 |
+| 💾 **记忆与缓存** | 全局经验池 + 工程专属记忆（SQLite）；DeepSeek 前缀缓存监控，实测缓存命中率 90%+，费用节省约 80% |
+| 🧩 **可扩展** | 支持用户自定义工具（User Tool Extensions）与 Skill 规则文件，Agent 可沉淀可复用的处理能力 |
 
 ---
 
-## 🛠️ 安装与环境配置
+## 🎬 应用效果
 
-### 环境要求
+<table>
+<tr>
+<td width="50%" align="center"><b>OSM 交通路网获取、裁剪与分级渲染</b></td>
+<td width="50%" align="center"><b>DEM 填洼、流向与水文分析</b></td>
+</tr>
+<tr>
+<td><img src="docs/images/demo_osm_transport.jpg" alt="OSM 交通路网"/></td>
+<td><img src="docs/images/demo_dem_hydrology.png" alt="DEM 水文分析"/></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><b>遥感影像掩膜叠加与水体 / 植被指数计算</b></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/demo_mask_index.png" alt="遥感指数与掩膜"/></td>
+</tr>
+</table>
 
-- QGIS：最低 `3.28`，推荐 `3.34 LTR` 或 `3.44`。
-- Python 依赖：`openai`、`earthengine-api`、`requests`。
-- 可选组件：Google Drive Desktop，用于较大 GEE 导出文件的本地同步。
-- 可选服务：智谱 GLM Vision API，用于截图和地图画布视觉分析。
+**示例：「获取这个区域的交通矢量数据」** —— Agent 自动完成：
 
-### 安装 Python 依赖
+1. 读取工程中的 AOI 边界并换算 WGS84 范围；
+2. 从 OSM 下载道路 842 条、铁路 60 条（需 VPN）；
+3. 重投影到 UTM 48N 并按 AOI 精确裁剪；
+4. 按 `highway` 等级配置分级符号（高速 / 国省道 / 县乡道 / 居住 / 步行）；
+5. 统计路网总长 410.9 km、路网密度 1.02 km/km²，并保存工程。
 
-#### Windows 环境
+---
 
-在 QGIS 对应的 OSGeo4W Shell 中运行：
+## 🏗️ 系统架构
+
+```mermaid
+flowchart TB
+    U["👤 用户（中文自然语言 / 截图 / @图层）"] --> UI
+
+    subgraph QGIS["QGIS 桌面端"]
+        UI["💬 Chat Dock 对话面板<br/>Markdown 渲染 · 里程碑进度 · 审批弹窗"]
+        UI --> H
+
+        subgraph CORE["Agent 核心（HarnessThread）"]
+            H["🔁 Agent 主循环<br/>工具调用 · 连续失败熔断 · 轮数上限"]
+            RP["🎯 Request Profile<br/>任务领域识别 · 动态工具包"]
+            PL["📋 Planner / StepRunner / Verifier<br/>计划审批 · 分步执行 · 结果核验"]
+            CP["🚇 Checkpoints<br/>断点保存 · 中断恢复"]
+            MP["🧾 Message Protocol<br/>tool_calls 序列修复"]
+            H <--> RP
+            H <--> PL
+            H <--> CP
+            H <--> MP
+        end
+
+        subgraph TOOLS["工具层（64 个原子工具）"]
+            T1["📐 PyQGIS 执行器<br/>静态校验 · 代码修复 · 安全审查"]
+            T2["⚙️ Processing 调用<br/>Catalog 检索 · 参数校验"]
+            T3["🛰️ 遥感分析<br/>指数计算 · 分区统计 · 栅格校验"]
+            T4["🗂️ 图层与工程<br/>加载 · 清理 · 渲染 · 保存验证"]
+            T5["🧩 用户扩展工具 / Skills"]
+        end
+
+        H --> TOOLS
+        TOOLS --> PRJ[("🗺️ QGIS Project<br/>图层 · 画布 · 工程文件")]
+
+        subgraph STORE["持久化"]
+            M[("🧠 SQLite 记忆<br/>全局 / 工程")]
+            A[("📁 .qgis_agent_runs<br/>运行日志 · 工具调用 · 报告")]
+            C[("📊 缓存监控<br/>cache_usage.jsonl")]
+        end
+        H <--> STORE
+    end
+
+    H <==> LLM["☁️ DeepSeek API<br/>V4 Flash / Pro · 原生视觉"]
+
+    subgraph EXT["外部数据源（需 VPN）"]
+        OSM["🗺️ OpenStreetMap<br/>Nominatim · Overpass · OSMnx"]
+        GEE["🌍 Google Earth Engine<br/>Sentinel-2 · DEM"]
+        GD["📦 Google Drive<br/>批量导出同步"]
+    end
+    TOOLS --> OSM
+    TOOLS --> GEE
+    GEE --> GD
+```
+
+### 一次任务的执行流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant UI as 对话面板
+    participant A as Agent 主循环
+    participant L as DeepSeek
+    participant T as 工具层
+    participant Q as QGIS 工程
+
+    U->>UI: 计算 @shijiao_2019101 的 NDWI
+    UI->>A: 任务 + 图层上下文（@ 提及注入）
+    A->>A: 识别领域，冻结工具包与提示前缀（利于缓存）
+    A->>L: 请求（系统提示 + 工程上下文 + 工具 schema）
+    L-->>A: tool_call：inspect_raster_file
+    A->>T: 执行并返回结构化 ToolResult
+    L-->>A: tool_call：compute_raster_index（B3, B8）
+    A->>T: Float32 安全计算，写出 GeoTIFF
+    T->>Q: 加载图层并渲染
+    A->>T: validate_project_outputs / save_project_and_verify
+    A-->>UI: 里程碑进度更新 + 中文总结报告
+```
+
+---
+
+## 🚀 快速开始
+
+### 1. 环境要求
+
+| 项目 | 要求 |
+|---|---|
+| QGIS | 最低 `3.28`，推荐 `3.34 LTR` 或 `3.44` |
+| Python 依赖 | `openai`（必需）、`earthengine-api`（GEE）、`requests` |
+| 大模型 | [DeepSeek 开放平台](https://platform.deepseek.com) API Key |
+| 网络 | **GEE / OSM 功能需开启 VPN**；可选 Google Drive Desktop 用于大文件同步 |
+
+### 2. 安装插件
+
+1. 从 [Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 下载 `qgis_agent_plugin_v1.4.0.zip`；
+2. QGIS 菜单 `插件` → `管理并安装插件` → `从 ZIP 安装`；
+3. 选择 ZIP 文件安装并重启 QGIS；
+4. 工具栏点击 **QGIS AI Agent Copilot** 打开右侧对话面板。
+
+> [!TIP]
+> 首次发送消息时，如检测到缺少 `openai` 依赖，插件会弹窗提示一键自动安装。
+
+### 3. 手动安装依赖（可选）
+
+**Windows**：在 QGIS 对应的 OSGeo4W Shell 中运行：
 
 ```cmd
 python -m pip install openai earthengine-api requests
 ```
 
+<details>
+<summary><b>macOS：在 QGIS Python 控制台中安装</b></summary>
 
-### 从 ZIP 安装插件
+```python
+import sys, runpy
 
-1. 从 [Releases](https://github.com/aboutqiguo/qgis-agent-plugin/releases/latest) 下载 `qgis_agent_plugin_v1.3.2.zip`。
-2. 打开 QGIS。
-3. 进入 `插件` -> `管理并安装插件`。
-4. 选择 `从 ZIP 安装`。
-5. 选择下载的 ZIP 文件。
-6. 安装完成后重启 QGIS。
-
-### 本地构建安装包
-
-在仓库根目录运行：
-
-```cmd
-python build.py
+original_argv = sys.argv[:]
+sys.argv = ["pip", "install", "--user", "openai", "earthengine-api", "requests",
+            "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"]
+try:
+    runpy.run_module("pip", run_name="__main__")
+except SystemExit as e:
+    print("安装完成，请彻底重启 QGIS" if e.code == 0 else f"退出码：{e.code}")
+finally:
+    sys.argv = original_argv
 ```
 
-构建完成后会生成：
+</details>
 
-```text
-qgis_agent_plugin_v1.3.2.zip
-```
+### 4. 基础配置
 
-### 插件配置
+点击对话面板右上角 ⚙️ 打开 **供应商配置**：
 
-打开 QGIS 后，在插件面板中进入设置页，建议配置：
+1. **DeepSeek**：填写 API Key（Base URL 默认 `https://api.deepseek.com`），点击「验证连接」；
+2. **Google Earth Engine**（可选，需 VPN）：填写已启用 Earth Engine API 的 Google Cloud Project ID，点击「重新认证」完成浏览器授权；
+3. **记忆与性格**（可选）：点击「构建 / 刷新本地 Catalog」索引本机 Processing 算法，可显著提升算法调用准确率。
 
-- DeepSeek API Key：用于主要对话、任务拆解和代码生成。
-- GLM API Key：用于截图、图像和地图画布视觉分析。
-- GEE Project ID：用于 Google Earth Engine 认证和云端任务。
-- Google Drive 本地路径：用于较大 GEE 导出文件的本地同步。
+---
 
-GEE 首次使用时，点击 `Re-Authenticate` 完成 Google 授权。
+## 🖥️ 界面介绍
+
+### 对话面板
+
+- **对话区**：支持 Markdown 表格、代码块、可折叠的「🧠 思考与执行过程」；
+- **@ 提及**：输入 `@图层名` 自动注入该图层的 CRS、范围、数据源路径；
+- **任务里程碑进度**：长任务以地铁线路图展示步骤状态（✔ 完成 / 🚆 运行 / ✖ 遇阻）；
+- **权限模式**：底部切换「仅可查看 / 工作区内修改 / 完全权限」；
+- **模型与思考强度**：可选 DeepSeek-V4 Flash / Pro 及 High / Max / Disabled 思考模式；
+- **实时仪表**：轮次、步数、tok/s、累计 Token、缓存命中率、上下文占用。
+
+<div align="center"><img src="docs/images/ui_metro_progress.png" width="600" alt="任务里程碑进度"/></div>
+
+### 设置窗口
+
+<table>
+<tr>
+<td width="50%" align="center"><b>DeepSeek 配置</b><br/><sub>API 端点、密钥与连接验证，原生多模态视觉已启用</sub></td>
+<td width="50%" align="center"><b>缓存监控</b><br/><sub>缓存命中率、费用估算与前缀稳定性诊断</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/ui_settings_deepseek.jpg" alt="DeepSeek 配置"/></td>
+<td><img src="docs/images/ui_settings_cache.jpg" alt="缓存监控"/></td>
+</tr>
+<tr>
+<td align="center"><b>Google Earth Engine 配置</b><br/><sub>Project ID、认证与直连 / Drive 下载策略（需 VPN）</sub></td>
+<td align="center"><b>记忆与性格</b><br/><sub>AI 性格、全局经验池、工程记忆与本地 Processing Catalog</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/ui_settings_gee.jpg" alt="GEE 配置"/></td>
+<td><img src="docs/images/ui_settings_memory.jpg" alt="记忆与性格"/></td>
+</tr>
+</table>
+
+---
+
+## 💡 使用示例
+
+| 场景 | 提示词示例 | 网络 |
+|---|---|---|
+| 遥感指数 | `计算 @shijiao_2019101 这个区域的 NDWI，并用蓝色渐变渲染` | 本地 |
+| 掩膜统计 | `基于 @shijian_mask 统计 @shijiao_2019101 各波段在掩膜内外的均值与标准差` | 本地 |
+| 图层管理 | `删除除了 @shijiao_2019101 以外的图层，并加载 D:\data\mask.png` | 本地 |
+| Processing | `将建筑物图层裁剪到研究区边界内，统计数量并保存工程` | 本地 |
+| 水文分析 | `基于 DEM 做填洼、流向、汇流累积并提取河网` | 本地 |
+| OSM 交通 | `获取这个区域的交通矢量数据，按道路等级分级渲染` | 🔐 VPN |
+| OSM 边界 | `获取长沙市雨花区的行政边界、建筑物、POI 和水系` | 🔐 VPN |
+| GEE 影像 | `基于研究区边界下载 2024 年夏季 Sentinel-2 SR，云量 <20%，B2/B3/B4/B8，10 m，median 合成` | 🔐 VPN |
+| GEE DEM | `下载研究区 Copernicus DEM GLO-30，30 m，EPSG:4326，并加载到 QGIS` | 🔐 VPN |
+
+**使用建议**
+
+- 复杂任务建议先让 Agent 给出计划，确认后再执行；
+- GEE 请求越明确越稳定（时间范围、波段、云量、分辨率、处理方式、输出名）；
+- 叠加分析前确保输入数据 CRS、范围与像元大小一致；
+- 任务中断后，直接回复「继续」即可从最近的执行节点恢复。
 
 ---
 
 ## 🌍 GEE 数据下载策略
 
-`v1.3.2` 采用稳定优先的 GEE 下载路线：
-
 ```text
-GEE Export.image.toDrive
-        |
-        v
-Google Drive API 查询导出文件
-        |
-        +-- 文件总量 <= 32MB
-        |       |
-        |       v
-        |   Drive API 直连下载
-        |       |
-        |       +-- 字节数校验 + raster 校验成功 -> 加载到本地
-        |       |
-        |       +-- 下载失败或 raster 校验失败 -> Google Drive Desktop 同步
-        |
-        +-- 文件总量 > 32MB
-                |
-                v
-           Google Drive Desktop 本地同步
-                |
-                +-- 同步/复制/校验成功 -> 加载到本地
-                |
-                +-- 自动路线失败 -> 给出 Google Drive 手动下载链接
+估算范围、像元数、波段数和网格尺寸
+        │
+        ├── 满足 Earth Engine 直连下载限制
+        │       → getDownloadURL 直接下载
+        │       → GeoTIFF 完整性与有效像元验证
+        │
+        └── 超限或直连失败
+                → Export.image.toDrive（任务唯一前缀）
+                → Drive API 流式下载 + 断点续传
+                → 字节数与 GeoTIFF 校验
+                → 失败时回退 Google Drive Desktop 同步
+                → 仍失败时返回人工下载信息
 ```
 
-关键规则：
-
-- 常规遥感下载不使用 `image.getDownloadURL()`，该接口只适合很小的直接下载任务。
-- 统一通过插件封装的 `GEEDownloader.download_ee_object()` 导出和下载。
-- Drive API 直连下载阈值为 `32MB`，更大文件优先走 Google Drive Desktop 同步，避免 GeoTIFF 不完整或 tile 损坏。
-- Sentinel-2 请求必须确认数据集、时间范围、波段、云量阈值、分辨率、处理方法和输出名。
-- DEM 请求必须确认 DEM 数据集、分辨率、输出 CRS、输出名和是否加载图层。
-- Copernicus DEM GLO-30 在 GEE 中是 `ImageCollection`，插件已封装正确加载方式。
+> [!IMPORTANT]
+> GEE 认证、导出与 Google Drive 下载全过程都需要访问 Google 服务，请确保 QGIS 进程能通过 VPN / 系统代理访问外网。
 
 ---
 
-## 🔄 插件更新
+## ❓ 常见问题
 
-### 普通用户
+<details>
+<summary><b>OSM / GEE 下载一直超时或报网络错误？</b></summary>
 
-1. 下载最新 ZIP：`qgis_agent_plugin_v1.3.2.zip`。
-2. 在 QGIS 中进入 `插件` -> `管理并安装插件` -> `从 ZIP 安装`。
-3. 选择新 ZIP 并覆盖安装。
-4. 重启 QGIS。
+请确认已开启 VPN，且 QGIS 进程可以使用该代理（部分 VPN 需开启「系统代理」或「TUN / 全局模式」）。可在 QGIS `设置 → 选项 → 网络` 中配置代理后重试。
+</details>
 
-### 开发者
+<details>
+<summary><b>Agent 提示「当前任务未能自动完成（已安全暂停）」？</b></summary>
 
-1. 拉取仓库最新代码。
-2. 检查 `qgis_agent_plugin/metadata.txt` 版本号。
-3. 运行 `python build.py` 重新生成 ZIP。
-4. 在 QGIS 中从 ZIP 安装并重启。
+为防止无意义的重试死循环，连续 4 次工具失败或达到单任务轮数上限时会自动暂停，并保留已生成的图层。可根据诊断卡片中的报错调整参数，或回复「继续」从断点恢复。
+</details>
 
-### 发布检查清单
+<details>
+<summary><b>如何降低 Token 费用？</b></summary>
 
-- `qgis_agent_plugin/metadata.txt` 中 `version=1.3.2`。
-- `plugins.xml` 中版本号、文件名和下载 URL 与 Release 一致。
-- ZIP 包内不包含 `__pycache__`、`.pyc`、`.log`、`.idea`、`agent_run.log`、`token_usage.jsonl`。
-- GEE、OSM、Processing、项目保存和插件 UI 至少完成一次基础 smoke test。
+插件已冻结每个任务的系统提示与工具 schema 以提升 DeepSeek 前缀缓存命中率，可在「设置 → 缓存监控」查看命中率与费用估算。尽量在同一工程内连续提问效果更好。
+</details>
 
----
+<details>
+<summary><b>提交 Issue 需要提供什么？</b></summary>
 
-## 📖 功能与使用说明
-
-### OSM 数据获取示例
-
-```text
-请在 QGIS 当前项目中获取长沙市雨花区的 OSM 行政边界、道路、建筑物、POI 和水系数据，保存到项目目录，并按边界裁剪后加载到 QGIS。
-```
-
-### GEE Sentinel-2 下载示例
-
-```text
-请基于当前项目中的雨花区边界，从 GEE 下载 Sentinel-2 SR Harmonized 数据。
-时间范围为 2024-06-01 到 2024-09-30，云量小于 20%，下载 B2、B3、B4、B8 波段，分辨率 10 米，使用云掩膜后的 median 合成，输出为 yuhua_s2_2024_summer_b2348.tif。
-```
-
-### DEM 下载示例
-
-```text
-请基于当前项目中的研究区边界，从 GEE 下载 Copernicus DEM GLO-30，分辨率 30 米，输出 CRS 为 EPSG:4326，保存为 study_area_dem.tif，并加载到 QGIS。
-```
-
-### 波段计算示例
-
-```text
-请使用当前项目中的 Sentinel-2 影像计算 NDVI，公式为 (B8 - B4) / (B8 + B4)，输出为 GeoTIFF，并加载到 QGIS 中使用绿-黄-红渐变渲染。
-```
-
-### QGIS Processing 分析示例
-
-```text
-请将建筑物图层裁剪到研究区边界内，创建空间索引，统计裁剪后建筑物数量，并保存当前 QGIS 工程。
-```
-
-### 工作建议
-
-- 复杂任务建议使用计划模式，先审阅步骤再执行。
-- GEE 数据请求越明确越稳定，尤其是时间范围、波段、分辨率、处理方式和输出名。
-- OSM 连续下载多个主题时，建议检查每次返回的 `output_file`、`layer_name`、`geometry_type` 和 `tags`。
-- 栅格叠加、距离分析和 rasterize/proximity 前，应确保输入数据 CRS、范围和像元大小一致。
+QGIS 版本、插件版本、操作系统、任务提示词，以及插件目录下 `utils/agent_run.log` 的相关片段或最小可复现数据。
+</details>
 
 ---
 
-## 📈 更新日志 (Changelog)
+## 📈 更新日志
 
-### v1.3.2
+### v1.4.0（2026-11）
 
-- 锁定稳定版本 `1.3.2`。
-- QGIS 最低版本调整为 `3.28`。
-- 新增/强化 GEE 智能下载路由：Drive API 小文件、Google Drive Desktop 大文件、失败时给出手动下载提示。
-- Drive API 直连阈值调整为 `32MB`，并加入字节数与 raster 校验。
-- 新增 DEM 下载工作流，修复 Copernicus GLO-30 数据集类型问题。
-- Sentinel-2 下载必须由用户确认参数，不再自动假设 NDVI、波段、日期或处理方式。
-- 新增 raster 可读性和有效像元校验。
-- 新增 QGIS Processing Catalog 数据库与算法查询能力。
-- 增强 OSM 矢量下载、分块、裁剪和结果验证。
-- 优化计划模式与工具调用链路，减少无效执行和 token 消耗。
-- 修复浅色/深色主题下部分 UI 可读性问题。
+- **原生多模态**：视觉能力统一迁移到 DeepSeek 原生通道，移除第三方视觉平台依赖；
+- **遥感工具**：新增 `compute_raster_index`、`compute_raster_zonal_stats`，Float32 安全计算避免 UInt16 下溢，新增遥感指数 Skill；
+- **任务里程碑进度**：地铁线路图式进度组件，节点全中文、自动换行、防重叠，仅从当前任务提取步骤；
+- **断点与恢复**：执行节点 Checkpoint、中断恢复上下文、连续失败熔断与中文诊断卡片；
+- **Processing 增强**：图层名 / ID 自动解析为数据源路径或图层对象，保留 `TEMPORARY_OUTPUT` 语义；
+- **代码自愈**：新增 QGIS 3.44 渲染器 / GDAL 类型等高频 API 误用静态拦截，GDAL 临时数据集自动修复；
+- **权限模式**：仅可查看 / 工作区内修改 / 完全权限三级模式，外部路径写入需授权；
+- **记忆与缓存**：会话记忆原地更新避免「忘记上一轮」，新增缓存监控与费用估算面板；
+- **UI 修复**：Markdown 渲染保留 `snake_case` 下划线；批量移除图层不再触发 C++ 对象已删除异常；
+- 测试用例增至 140 项。
 
-### v1.3.1-beta
+<details>
+<summary><b>历史版本</b></summary>
 
-- 强化工具可用性测试与模拟测试。
-- 优化 OSM、GEE、Processing、Skill、Prompt 的协同逻辑。
-- 增强项目记忆、日志分析和 token 消耗估算。
-- 改进 QGIS API 常见错误修复策略。
+#### v1.3.3
+- 结构化运行状态与保守完成判定；修复多工具消息协议；计划模式结构化步骤与 verifier；
+- OSM 自适应分块、去重与安全写入；GEE 直连 / Drive 两级路由与断点续传；
+- Processing 参数 fail-closed 校验；精简提示词与动态工具 schema。
 
-### v1.1.0
+#### v1.3.2
+- QGIS 最低版本调整为 3.28；新增 DEM 下载工作流、栅格有效像元校验与 Processing Catalog。
 
-- 完成基础架构、线程安全和 QGIS UI 兼容性优化。
-- 初步接入 OSM、GEE、PyQGIS 和 Processing 调用。
-- 增加基础自然语言任务拆解和执行能力。
-- 改进 ZIP 打包和跨平台路径兼容性。
+#### v1.3.1-beta
+- 强化工具模拟测试；优化 OSM / GEE / Processing / Skill 协同与项目记忆。
+
+#### v1.1.0
+- 基础架构、线程安全与 UI 兼容；初步接入 OSM、GEE、PyQGIS 与 Processing。
+
+</details>
 
 ---
 
-## 👨‍💻 开发者信息
-
-### 目录结构
+## 👨‍💻 开发与测试
 
 ```text
 qgis_agent_plugin/
-  agent_plugin.py              插件入口
-  metadata.txt                 QGIS 插件元数据
-  bridges/                     GEE、OSM 等外部数据桥接
-  core/                        规划、验证、工具注册、结果检查、记忆、Catalog
-  prompts/                     系统提示词
-  skills/                      GEE、OSM、QGIS API 等技能规则
-  tools/                       Agent 可调用工具
-  ui/                          聊天面板和设置窗口
-  utils/                       日志、更新检查等工具
+├── agent_plugin.py        插件入口
+├── metadata.txt           QGIS 插件元数据
+├── bridges/               GEE、OSM 外部数据桥接
+├── core/                  Agent 主循环、规划/验证、工具注册、校验器、记忆、Catalog、断点
+├── prompts/               系统提示词
+├── skills/core/           GEE、OSM、GDAL 坑点、投影选择、制图、遥感指数等规则
+├── tools/                 原子工具实现与 qgis_tools 子模块
+├── ui/                    对话面板、设置窗口、Markdown 渲染、里程碑进度
+└── utils/                 日志、依赖管理、更新检查
+tests/                     单元测试与工具契约模拟测试
+docs/                      图片与测试报告
 ```
-
-### 开发与测试
 
 ```cmd
-python -m py_compile qgis_agent_plugin\tools\tools.py qgis_agent_plugin\bridges\gee_bridge.py qgis_agent_plugin\core\harness_thread.py
-python build.py
+pytest tests -q            # 运行测试
+python sync_dev.py         # 同步到本机 QGIS 插件目录（开发用）
+python build.py            # 打包 qgis_agent_plugin_v1.4.0.zip
 ```
-
-建议测试覆盖：
-
-- OSM 行政边界、道路、建筑物、POI、水系下载。
-- GEE DEM 下载。
-- GEE Sentinel-2 参数确认和下载。
-- raster 校验、裁剪、波段计算。
-- QGIS Processing 算法调用。
-- 项目保存与预期图层验证。
-- 深色/浅色主题 UI 可读性。
-
-### 参考项目
-
-本插件开发过程中参考了开源项目 [GeoCode](https://github.com/chenyusheng2001/GeoCode) 的部分工程设计思路，感谢相关开源工作对 GIS Agent 方向的探索。
 
 ---
 
-## 📄 协议与开源声明
+## 🗺️ 路线图
 
-本项目采用 MIT License。
+- [ ] 支持更多 LLM 供应商（GLM、Qwen、OpenAI 兼容接口）
+- [ ] 出图排版（Layout）自动生成与视觉迭代评审
+- [ ] 更多遥感数据源（Landsat、MODIS）与国内可直连数据源
+- [ ] 英文界面与文档
 
-欢迎通过 GitHub Issues 提交问题、建议和复现实验记录。提交问题时建议附带：
+---
 
-- QGIS 版本。
-- 插件版本。
-- 操作系统。
-- 任务提示词。
-- `agent_run.log` 相关片段。
-- 测试项目路径或最小可复现数据。
+## 📄 协议与致谢
+
+本项目采用 **MIT License**。
+
+开发过程中参考了 [GeoCode](https://github.com/chenyusheng2001/GeoCode)、Smart-QGIS、[qgis_mcp](https://github.com/jjsantos01/qgis_mcp)、MapAgent 等开源项目在 GIS Agent 方向的设计思路，感谢相关开源工作。
+
+欢迎通过 [Issues](https://github.com/aboutqiguo/qgis-agent-plugin/issues) 提交问题与建议，如果这个项目对你有帮助，请点一个 ⭐ Star 支持！

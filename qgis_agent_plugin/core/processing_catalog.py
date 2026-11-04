@@ -1104,15 +1104,28 @@ def validate_processing_algorithm_call(alg_id: str, parameters: Dict[str, Any]) 
         }
     try:
         context = QgsProcessingContext()
-        ok = bool(alg.checkParameterValues(parameters, context))
+        check_result = alg.checkParameterValues(parameters, context)
+        if isinstance(check_result, (tuple, list)):
+            ok = bool(check_result[0]) if check_result else False
+            check_message = str(check_result[1]) if len(check_result) > 1 else ""
+        else:
+            ok = bool(check_result)
+            check_message = ""
         if not ok:
             return {
                 "ok": False,
-                "message": "QGIS rejected the processing parameter values.",
+                "message": check_message or "QGIS rejected the processing parameter values.",
                 "error_type": "processing_error",
                 "data": data,
                 "suggestions": ["Inspect layer names, parameter types, and enum values before retrying."],
             }
     except Exception as exc:
         data["qgis_check_error"] = str(exc)
+        return {
+            "ok": False,
+            "message": f"QGIS parameter validation failed internally: {exc}",
+            "error_type": "processing_error",
+            "data": data,
+            "suggestions": ["Rebuild the processing catalog and describe the algorithm before retrying."],
+        }
     return {"ok": True, "message": "Processing algorithm call is valid.", "data": data}

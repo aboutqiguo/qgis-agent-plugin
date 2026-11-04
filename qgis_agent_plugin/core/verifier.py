@@ -76,6 +76,11 @@ def verify_step(
         if not exists:
             suggestions.append(f"Create or load expected layer: {expected_layer}")
 
+    for expected_output in step.expected_outputs:
+        check, output_suggestions = _verify_expected_output(expected_output, project_home)
+        checks.append(check)
+        suggestions.extend(output_suggestions)
+
     if artifact_dir:
         checks.extend(_artifact_integrity_checks(artifact_dir))
 
@@ -160,15 +165,88 @@ def _qgis_layer_exists(layer_name: str) -> bool:
 
         return bool(QgsProject.instance().mapLayersByName(layer_name))
     except Exception:
-        return True
+        return False
 
 
 def _artifact_integrity_checks(artifact_dir: str) -> List[Dict[str, Any]]:
     checks: List[Dict[str, Any]] = []
-    for name in ("run.json",):
+    for name in ("run.json", "manifest.json"):
         path = os.path.join(artifact_dir, name)
-        checks.append({"name": "artifact_integrity", "target": path, "ok": os.path.exists(path)})
+        ok = os.path.exists(path)
+        if ok:
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    ok = isinstance(json.load(handle), dict)
+            except Exception:
+                ok = False
+        checks.append({"name": "artifact_integrity", "target": path, "ok": ok})
     return checks
+
+
+def _verify_expected_output(output: Dict[str, Any], project_home: str) -> Tuple[Dict[str, Any], List[str]]:
+    output_type = str(output.get("type") or "").lower()
+    target = str(output.get("path") or output.get("name") or "")
+    suggestions: List[str] = []
+    check: Dict[str, Any] = {"name": "expected_output_contract", "target": target, "type": output_type, "ok": False}
+
+    if output_type in {"file", "raster_file", "vector_file"}:
+        path = _resolve_project_path(str(output.get("path") or ""), project_home)
+        min_size = int(output.get("min_size_bytes") or 1)
+        check.update({"target": path, "exists": os.path.exists(path)})
+        if os.path.exists(path):
+            check["size_bytes"] = os.path.getsize(path)
+            check["ok"] = check["size_bytes"] >= min_size
+        if check["ok"] and output_type == "raster_file":
+            try:
+                from .raster_validation import validate_raster_has_data
+
+                result = validate_raster_has_data(
+                    path,
+                    bands=output.get("bands"),
+                    min_valid_percent=float(output.get("min_valid_percent") or 0.01),
+                )
+                check["raster_validation"] = result
+                check["ok"] = bool(result.get("ok"))
+            except Exception as exc:
+                check["ok"] = False
+                check["error"] = str(exc)
+        if not check["ok"]:
+            suggestions.append(f"Create and validate expected output file: {path}")
+        return check, suggestions
+
+    if output_type in {"layer", "vector_layer", "raster_layer"}:
+        try:
+            from qgis.core import QgsMapLayerType, QgsProject
+
+            matches = QgsProject.instance().mapLayersByName(str(output.get("name") or ""))
+            if not matches:
+                suggestions.append(f"Create or load expected layer: {target}")
+                return check, suggestions
+            layer = matches[0]
+            check["valid"] = bool(layer.isValid())
+            check["crs"] = layer.crs().authid() if layer.crs().isValid() else ""
+            type_ok = True
+            if output_type == "vector_layer":
+                type_ok = layer.type() == QgsMapLayerType.VectorLayer
+                if type_ok and output.get("min_feature_count") is not None:
+                    check["feature_count"] = int(layer.featureCount())
+                    type_ok = check["feature_count"] >= int(output["min_feature_count"])
+            elif output_type == "raster_layer":
+                type_ok = layer.type() == QgsMapLayerType.RasterLayer
+                if type_ok and output.get("band_count") is not None:
+                    check["band_count"] = int(layer.bandCount())
+                    type_ok = check["band_count"] == int(output["band_count"])
+            crs_ok = not output.get("crs") or check["crs"] == str(output.get("crs"))
+            check["ok"] = bool(check["valid"] and type_ok and crs_ok)
+        except Exception as exc:
+            check["error"] = str(exc)
+        if not check["ok"]:
+            suggestions.append(f"Make expected layer satisfy its output contract: {target}")
+        return check, suggestions
+
+    check["error"] = "unsupported output contract type"
+    suggestions.append(f"Use a supported expected output type for: {target}")
+    return check, suggestions
 
 
 def _is_screenshot_step(step: TaskStep, tool_name: str) -> bool:

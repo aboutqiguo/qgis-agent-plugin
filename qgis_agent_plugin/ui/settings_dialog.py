@@ -1,53 +1,11 @@
 from qgis.PyQt.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                                  QLineEdit, QPushButton, QMessageBox,
                                  QListWidget, QStackedWidget, QWidget, QComboBox,
-                                 QProgressBar)
+                                 QProgressBar, QGridLayout, QGroupBox,
+                                 QScrollArea, QFrame)
 from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsSettings
 
-DEFAULT_GLM_VISION_MODEL = "glm-4v-flash"
-FREE_GLM_VISION_MODELS = [
-    ("GLM-4V-Flash (免费，默认轻量)", "glm-4v-flash"),
-    ("GLM-4.6V-Flash (免费，增强视觉)", "glm-4.6v-flash"),
-    ("GLM-4.1V-Thinking-Flash (免费，视觉推理)", "glm-4.1v-thinking-flash"),
-]
-
-def _build_glm_verify_image_data_url():
-    import base64
-    import struct
-    import zlib
-
-    width = 64
-    height = 64
-    rows = []
-    for y in range(height):
-        row = bytearray([0])
-        for x in range(width):
-            if x < width // 2 and y < height // 2:
-                row.extend((31, 111, 235))
-            elif x >= width // 2 and y < height // 2:
-                row.extend((255, 255, 255))
-            elif x < width // 2:
-                row.extend((25, 135, 84))
-            else:
-                row.extend((220, 53, 69))
-        rows.append(bytes(row))
-
-    def chunk(tag, data):
-        body = tag + data
-        return (
-            struct.pack(">I", len(data))
-            + body
-            + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
-        )
-
-    png = (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(b"".join(rows)))
-        + chunk(b"IEND", b"")
-    )
-    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -64,7 +22,7 @@ class SettingsDialog(QDialog):
         self.nav_list = QListWidget()
         self.nav_list.setFixedWidth(160)
         self.nav_list.addItem("🐋 DeepSeek")
-        self.nav_list.addItem("🧠 智谱 AI (GLM)")
+        self.nav_list.addItem("📊 缓存监控")
         self.nav_list.addItem("🌍 Google Earth Engine")
         self.nav_list.addItem("🧬 记忆与性格")
         self.nav_list.addItem("🔄 检查更新")
@@ -79,7 +37,8 @@ class SettingsDialog(QDialog):
         
         # Build Pages
         self.stack.addWidget(self.build_deepseek_page())
-        self.stack.addWidget(self.build_zhipu_page())
+        self.cache_page = self.build_cache_monitor_page()
+        self.stack.addWidget(self.cache_page)
         self.stack.addWidget(self.build_gee_page())
         self.stack.addWidget(self.build_memory_page())
         self.stack.addWidget(self.build_update_page())
@@ -131,7 +90,13 @@ class SettingsDialog(QDialog):
         link = QLabel("<a href='https://platform.deepseek.com/'>👉 前往 DeepSeek 开放平台获取 API Key</a>")
         link.setOpenExternalLinks(True)
         layout.addWidget(link)
-        layout.addSpacing(20)
+        layout.addSpacing(10)
+
+        info_box = QLabel("✨ <b>原生多模态视觉已启用</b>：DeepSeek 当前版本已原生支持图像解析、窗口截图理解与地图排版评审，无需再配置第三方视觉平台。")
+        info_box.setWordWrap(True)
+        info_box.setStyleSheet("background-color: #e7f1ff; color: #0c5460; border: 1px solid #b8daff; border-radius: 4px; padding: 10px; margin-bottom: 10px;")
+        layout.addWidget(info_box)
+        layout.addSpacing(10)
         
         self.ds_url_input = QLineEdit()
         self.ds_url_input.setPlaceholderText("https://api.deepseek.com")
@@ -149,39 +114,151 @@ class SettingsDialog(QDialog):
         
         return page
 
-    def build_zhipu_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
+    def build_cache_monitor_page(self):
+        page = QScrollArea()
+        page.setWidgetResizable(True)
+        page.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setAlignment(Qt.AlignTop)
-        
-        title = QLabel("<h2>🧠 智谱 AI (GLM-4V) 配置</h2>")
+
+        title = QLabel("<h2>📊 DeepSeek 缓存监控</h2>")
         layout.addWidget(title)
-        
-        link = QLabel("<a href='https://open.bigmodel.cn/'>👉 前往 智谱 AI 开放平台获取 API Key</a>")
-        link.setOpenExternalLinks(True)
-        layout.addWidget(link)
-        layout.addSpacing(20)
-        
-        self.glm_url_input = QLineEdit()
-        self.glm_url_input.setPlaceholderText("https://open.bigmodel.cn/api/paas/v4")
-        layout.addLayout(self.create_form_row("API 端点 (Base URL)", self.glm_url_input, "多模态视觉请求端点。默认：https://open.bigmodel.cn/api/paas/v4"))
-        
-        self.glm_key_input = QLineEdit()
-        self.glm_key_input.setEchoMode(QLineEdit.Password)
-        self.glm_key_input.setPlaceholderText("您的智谱 API Key")
-        layout.addLayout(self.create_form_row("API Key", self.glm_key_input, "您的专属认证密钥。"))
-        
-        self.glm_vision_combo = QComboBox()
-        for label, model_id in FREE_GLM_VISION_MODELS:
-            self.glm_vision_combo.addItem(label, model_id)
-        layout.addLayout(self.create_form_row("视觉模型 (Vision Model)", self.glm_vision_combo, "用于解析图像、屏幕截图的视觉辅助大模型。"))
-        
-        self.verify_glm_btn = QPushButton("验证智谱连接 (Verify)")
-        self.verify_glm_btn.setStyleSheet("padding: 8px; background-color: #0d6efd; color: white; border: none; border-radius: 4px; font-weight: bold;")
-        self.verify_glm_btn.clicked.connect(self.verify_zhipu)
-        layout.addWidget(self.verify_glm_btn)
-        
+
+        desc = QLabel(
+            "统计供应商返回的缓存命中/未命中 Token，并用匿名结构指纹定位缓存失效。"
+            "监控不会保存提示词正文、API Key 或工具参数。"
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("统计范围："))
+        self.cache_period_combo = QComboBox()
+        self.cache_period_combo.addItem("当前项目 (This Project)", "current_project")
+        self.cache_period_combo.addItem("全局 - 最近 24 小时", 1)
+        self.cache_period_combo.addItem("全局 - 最近 7 天", 7)
+        self.cache_period_combo.addItem("全局 - 最近 30 天", 30)
+        self.cache_period_combo.setCurrentIndex(0)
+        self.cache_period_combo.currentIndexChanged.connect(self.refresh_cache_metrics)
+        controls.addWidget(self.cache_period_combo)
+        controls.addStretch()
+        self.cache_refresh_btn = QPushButton("刷新统计")
+        self.cache_refresh_btn.clicked.connect(self.refresh_cache_metrics)
+        controls.addWidget(self.cache_refresh_btn)
+        layout.addLayout(controls)
+
+        usage_group = QGroupBox("缓存与 Token")
+        usage_layout = QGridLayout(usage_group)
+        self.cache_metric_labels = {}
+        metric_rows = [
+            ("requests", "API 请求"),
+            ("coverage", "缓存字段覆盖率"),
+            ("hit_tokens", "命中缓存输入"),
+            ("miss_tokens", "未命中缓存输入"),
+            ("output_tokens", "输出 Token"),
+        ]
+        for row, (key, label_text) in enumerate(metric_rows):
+            usage_layout.addWidget(QLabel(label_text), row, 0)
+            value_label = QLabel("-")
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            usage_layout.addWidget(value_label, row, 1)
+            self.cache_metric_labels[key] = value_label
+        usage_layout.addWidget(QLabel("缓存命中率"), len(metric_rows), 0)
+        self.cache_hit_progress = QProgressBar()
+        self.cache_hit_progress.setRange(0, 1000)
+        self.cache_hit_progress.setValue(0)
+        self.cache_hit_progress.setFormat("暂无数据")
+        usage_layout.addWidget(self.cache_hit_progress, len(metric_rows), 1)
+        layout.addWidget(usage_group)
+
+        cost_group = QGroupBox("费用估算")
+        cost_layout = QGridLayout(cost_group)
+        self.cache_cost_labels = {}
+        for row, (key, label_text) in enumerate([
+            ("actual", "估算实际费用"),
+            ("without_cache", "无缓存估算费用"),
+            ("savings", "估算节省"),
+        ]):
+            cost_layout.addWidget(QLabel(label_text), row, 0)
+            value_label = QLabel("-")
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            cost_layout.addWidget(value_label, row, 1)
+            self.cache_cost_labels[key] = value_label
+        cost_note = QLabel("按 DeepSeek 标准价格估算，实际费用以供应商账单为准。")
+        cost_note.setWordWrap(True)
+        cost_layout.addWidget(cost_note, 3, 0, 1, 2)
+        layout.addWidget(cost_group)
+
+        diagnostics_group = QGroupBox("结构稳定性诊断")
+        diagnostics_layout = QVBoxLayout(diagnostics_group)
+        self.cache_diagnostics_label = QLabel("暂无监控数据。")
+        self.cache_diagnostics_label.setWordWrap(True)
+        self.cache_diagnostics_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        diagnostics_layout.addWidget(self.cache_diagnostics_label)
+        layout.addWidget(diagnostics_group)
+
+        self.cache_log_path_label = QLabel("")
+        self.cache_log_path_label.setWordWrap(True)
+        self.cache_log_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(self.cache_log_path_label)
+        layout.addStretch()
+        page.setWidget(content)
         return page
+
+    def refresh_cache_metrics(self, *_args):
+        try:
+            from ..core.cache_metrics import diagnostic_messages, get_summary
+
+            scope = self.cache_period_combo.currentData()
+            if scope == "current_project":
+                from qgis.core import QgsProject
+                proj_home = QgsProject.instance().homePath() or ""
+                summary = get_summary(project_home=proj_home)
+            else:
+                days = float(scope or 30)
+                summary = get_summary(days=days)
+            requests = int(summary.get("request_count") or 0)
+            coverage = float(summary.get("cache_coverage") or 0)
+            hit_rate = summary.get("cache_hit_rate")
+
+            self.cache_metric_labels["requests"].setText(f"{requests:,}")
+            self.cache_metric_labels["coverage"].setText(f"{coverage:.1%}")
+            self.cache_metric_labels["hit_tokens"].setText(
+                f"{int(summary.get('prompt_cache_hit_tokens') or 0):,}"
+            )
+            self.cache_metric_labels["miss_tokens"].setText(
+                f"{int(summary.get('prompt_cache_miss_tokens') or 0):,}"
+            )
+            self.cache_metric_labels["output_tokens"].setText(
+                f"{int(summary.get('completion_tokens') or 0):,}"
+            )
+            if hit_rate is None:
+                self.cache_hit_progress.setValue(0)
+                self.cache_hit_progress.setFormat("暂无缓存明细")
+            else:
+                self.cache_hit_progress.setValue(max(0, min(1000, int(float(hit_rate) * 1000))))
+                self.cache_hit_progress.setFormat(f"{float(hit_rate):.1%}")
+
+            actual = float(summary.get("estimated_actual_cost_cny") or 0)
+            without_cache = float(summary.get("estimated_without_cache_cost_cny") or 0)
+            savings = float(summary.get("estimated_savings_cny") or 0)
+            savings_rate = float(summary.get("estimated_savings_rate") or 0)
+            self.cache_cost_labels["actual"].setText(f"¥ {actual:.4f}")
+            self.cache_cost_labels["without_cache"].setText(f"¥ {without_cache:.4f}")
+            self.cache_cost_labels["savings"].setText(f"¥ {savings:.4f} ({savings_rate:.1%})")
+
+            diagnostic_lines = [f"• {message}" for message in diagnostic_messages(summary)]
+            diagnostic_lines.append(
+                "• 结构计数：工具集合变化 "
+                f"{summary.get('tool_schema_changes', 0)} 次；稳定前缀变化 "
+                f"{summary.get('stable_prefix_changes', 0)} 次；上下文截断 "
+                f"{summary.get('context_truncated_requests', 0)} 次。"
+            )
+            self.cache_diagnostics_label.setText("\n".join(diagnostic_lines))
+            self.cache_log_path_label.setText(f"监控日志：{summary.get('log_path', '')}")
+        except Exception as exc:
+            self.cache_diagnostics_label.setText(f"缓存统计读取失败：{exc}")
 
     def build_gee_page(self):
         page = QWidget()
@@ -195,7 +272,30 @@ class SettingsDialog(QDialog):
         desc.setStyleSheet("color: #6c757d; font-size: 12px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
-        layout.addSpacing(20)
+        layout.addSpacing(6)
+
+        gee_links = QLabel(
+            "<div style='line-height: 1.6; font-size: 12px;'>"
+            "👉 <a href='https://console.cloud.google.com/'>前往 Google Cloud 控制台查看/创建 Project ID</a><br/>"
+            "👉 <a href='https://code.earthengine.google.com/'>前往 Google Earth Engine 注册与开通 API</a>"
+            "</div>"
+        )
+        gee_links.setOpenExternalLinks(True)
+        layout.addWidget(gee_links)
+        layout.addSpacing(14)
+
+        project_label = QLabel("Google Cloud Project ID")
+        project_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(project_label)
+        self.gee_project_input = QLineEdit()
+        self.gee_project_input.setPlaceholderText("例如 my-gcp-project-123")
+        self.gee_project_input.setToolTip("GEE 认证和下载固定使用此 Project ID，不会回退到凭证中的旧项目。")
+        layout.addWidget(self.gee_project_input)
+        project_hint = QLabel("请在该 Project 中启用 Google Earth Engine API；保存后可点击“验证并连接”做预检。")
+        project_hint.setWordWrap(True)
+        project_hint.setStyleSheet("color: #6c757d; font-size: 12px;")
+        layout.addWidget(project_hint)
+        layout.addSpacing(8)
         
         self.gee_status_label = QLabel("当前绑定的 Project ID: <b style='color:red;'>未配置</b>")
         self.gee_status_label.setStyleSheet("padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; font-size: 13px;")
@@ -206,12 +306,17 @@ class SettingsDialog(QDialog):
         self.reauth_btn = QPushButton("重新认证 (Re-Authenticate)")
         self.reauth_btn.setStyleSheet("padding: 8px; background-color: #198754; color: white; border-radius: 4px;")
         self.reauth_btn.clicked.connect(self.reauthenticate_gee)
+
+        self.verify_gee_btn = QPushButton("验证并连接 (Verify)")
+        self.verify_gee_btn.setStyleSheet("padding: 8px; background-color: #0d6efd; color: white; border-radius: 4px;")
+        self.verify_gee_btn.clicked.connect(self.verify_gee_project)
         
         self.clear_auth_btn = QPushButton("清除缓存 (Clear Auth Cache)")
         self.clear_auth_btn.setStyleSheet("padding: 8px; background-color: #dc3545; color: white; border-radius: 4px;")
         self.clear_auth_btn.clicked.connect(self.clear_gee_auth)
         
         btn_layout.addWidget(self.reauth_btn)
+        btn_layout.addWidget(self.verify_gee_btn)
         btn_layout.addWidget(self.clear_auth_btn)
         layout.addLayout(btn_layout)
         
@@ -223,7 +328,13 @@ class SettingsDialog(QDialog):
         dl_layout = QVBoxLayout()
         download_group.setLayout(dl_layout)
         
-        dl_layout.addWidget(QLabel("智能路由：GEE 导出 <=32MB 时优先使用 Drive API 直连下载；超过 32MB 或栅格校验失败时，回退到本地 Google Drive Desktop 同步，仍失败则给出手动下载链接。"))
+        strategy_label = QLabel(
+            "智能路由：满足 Earth Engine 小文件限制时直接下载；较大任务导出到 Google Drive，"
+            "再通过 Drive API 流式下载。API 失败时回退到 Drive Desktop，同步仍失败则提供人工下载信息。"
+        )
+        strategy_label.setWordWrap(True)
+        strategy_label.setStyleSheet("font-weight: normal;")
+        dl_layout.addWidget(strategy_label)
         
         self.dl_path_label = QLabel("Google Drive 本地挂载路径 (Drive Path):")
         self.dl_path_label.setStyleSheet("font-weight: normal; margin-top: 10px;")
@@ -385,22 +496,15 @@ class SettingsDialog(QDialog):
 
     def change_page(self, index):
         self.stack.setCurrentIndex(index)
+        if hasattr(self, "cache_page") and self.stack.currentWidget() is self.cache_page:
+            self.refresh_cache_metrics()
 
     def load_settings(self):
         self.ds_url_input.setText(self.settings.value("qgis_agent/deepseek_base_url", "https://api.deepseek.com"))
         self.ds_key_input.setText(self.settings.value("qgis_agent/deepseek_api_key", ""))
         
-        self.glm_url_input.setText(self.settings.value("qgis_agent/glm_base_url", "https://open.bigmodel.cn/api/paas/v4"))
-        self.glm_key_input.setText(self.settings.value("qgis_agent/glm_api_key", ""))
-        
-        vision_model = self.settings.value("qgis_agent/glm_vision_model", DEFAULT_GLM_VISION_MODEL)
-        index = self.glm_vision_combo.findData(vision_model)
-        if index < 0:
-            index = self.glm_vision_combo.findData(DEFAULT_GLM_VISION_MODEL)
-        if index >= 0:
-            self.glm_vision_combo.setCurrentIndex(index)
-        
         gee_proj = self.settings.value("gee_agent_project_id", "")
+        self.gee_project_input.setText(str(gee_proj or ""))
         if gee_proj:
             self.gee_status_label.setText(f"当前绑定的 Project ID: <b style='color:green;'>{gee_proj}</b>")
         else:
@@ -443,14 +547,11 @@ class SettingsDialog(QDialog):
         auto_update = self.settings.value("qgis_agent/auto_check_update", False, type=bool)
         self.auto_update_cb.setChecked(auto_update)
         self.update_catalog_status()
+        self.refresh_cache_metrics()
 
     def save_settings(self):
         self.settings.setValue("qgis_agent/deepseek_base_url", self.ds_url_input.text().strip())
         self.settings.setValue("qgis_agent/deepseek_api_key", self.ds_key_input.text().strip())
-        
-        self.settings.setValue("qgis_agent/glm_base_url", self.glm_url_input.text().strip())
-        self.settings.setValue("qgis_agent/glm_api_key", self.glm_key_input.text().strip())
-        self.settings.setValue("qgis_agent/glm_vision_model", self.glm_vision_combo.currentData())
         
         self.settings.setValue("qgis_agent/agent_personality", self.personality_input.toPlainText())
         import os
@@ -473,6 +574,11 @@ class SettingsDialog(QDialog):
                 pass
         
         self.settings.remove("qgis_agent/gee_download_strategy")
+        gee_project = self.gee_project_input.text().strip()
+        if gee_project:
+            self.settings.setValue("gee_agent_project_id", gee_project)
+        else:
+            self.settings.remove("gee_agent_project_id")
         self.settings.setValue("qgis_agent/gee_drive_sync_path", self.dl_path_input.text().strip())
         self.settings.setValue("qgis_agent/auto_check_update", self.auto_update_cb.isChecked())
         
@@ -582,20 +688,79 @@ class SettingsDialog(QDialog):
             self.refresh_catalog_status_btn.setEnabled(True)
             QCoreApplication.processEvents()
         
-    def reauthenticate_gee(self):
-        from ..bridges.gee_bridge import GEEAuth
+    def _auto_install_package(self, pkg_name):
+        from ..utils.dependency_manager import install_packages_in_qgis
         from qgis.PyQt.QtWidgets import QMessageBox
+        from qgis.PyQt.QtCore import QCoreApplication
+        
+        QMessageBox.information(self, "正在安装", f"正在后台自动安装 {pkg_name}，请稍候几秒...")
+        QCoreApplication.processEvents()
+        
+        ok, msg = install_packages_in_qgis([pkg_name])
+        if ok:
+            QMessageBox.information(self, "安装成功", f"{pkg_name} 安装成功！现在可以正常使用了。")
+        else:
+            QMessageBox.critical(self, "安装失败", f"自动安装失败：\n{msg}\n\n建议在命令行中手动执行：\npip install {pkg_name}")
+
+    def reauthenticate_gee(self):
+        from ..bridges.gee_bridge import GEEAuth, is_ee_available
+        from qgis.PyQt.QtWidgets import QMessageBox
+
+        if not is_ee_available():
+            reply = QMessageBox.question(
+                self,
+                "缺少 Earth Engine 依赖",
+                "检测到您的 Python 环境尚未安装 Google Earth Engine API (earthengine-api)。\n\n是否立即尝试自动安装依赖？",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self._auto_install_package("earthengine-api")
+            return
+
+        project_id = self.gee_project_input.text().strip()
+        if not project_id:
+            QMessageBox.warning(self, "GEE", "请先填写 Google Cloud Project ID，再重新认证。")
+            return
         try:
-            if GEEAuth.authenticate_and_initialize(force=True):
+            self.settings.setValue("gee_agent_project_id", project_id)
+            if GEEAuth.authenticate_and_initialize(force=True, project_id=project_id):
                 self.load_settings()
                 QMessageBox.information(self, "GEE", "GEE 认证成功！")
         except Exception as e:
-            QMessageBox.critical(self, "GEE 错误", str(e))
+            QMessageBox.critical(self, "GEE 配置错误", GEEAuth.user_facing_error(e))
+
+    def verify_gee_project(self):
+        from ..bridges.gee_bridge import GEEAuth, is_ee_available
+        from qgis.PyQt.QtWidgets import QMessageBox
+
+        if not is_ee_available():
+            reply = QMessageBox.question(
+                self,
+                "缺少 Earth Engine 依赖",
+                "检测到您的 Python 环境尚未安装 Google Earth Engine API (earthengine-api)。\n\n是否立即尝试自动安装依赖？",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self._auto_install_package("earthengine-api")
+            return
+
+        project_id = self.gee_project_input.text().strip()
+        if not project_id:
+            QMessageBox.warning(self, "GEE", "请先填写 Google Cloud Project ID。")
+            return
+        try:
+            self.settings.setValue("gee_agent_project_id", project_id)
+            if GEEAuth.authenticate_and_initialize(project_id=project_id):
+                self.load_settings()
+                QMessageBox.information(self, "GEE", f"Project {project_id} 已通过认证和 API 可用性预检。")
+        except Exception as e:
+            QMessageBox.critical(self, "GEE 配置错误", GEEAuth.user_facing_error(e))
             
     def clear_gee_auth(self):
         from ..bridges.gee_bridge import clear_gee_auth as bridge_clear
         try:
             bridge_clear()
+            self.gee_project_input.clear()
             self.gee_status_label.setText("当前绑定的 Project ID: <b style='color:red;'>未配置 (已清除)</b>")
             QMessageBox.information(self, "成功", "已清除 Google Earth Engine 的认证信息。下次使用将要求重新登录。")
         except Exception as e:
@@ -617,7 +782,18 @@ class SettingsDialog(QDialog):
         try:
             resp = requests.get(f"{url}/models", headers={"Authorization": f"Bearer {key}"}, timeout=10)
             if resp.status_code == 200:
-                QMessageBox.information(self, "成功", "验证成功！您的 DeepSeek API Key 有效且网络连接正常。")
+                from ..utils.dependency_manager import check_module_installed
+                if not check_module_installed("openai"):
+                    reply = QMessageBox.question(
+                        self,
+                        "成功但缺少依赖",
+                        "DeepSeek API 验证成功！但检测到当前环境尚未安装核心依赖 'openai'。\n\n是否立即自动为您安装？",
+                        QMessageBox.Yes | QMessageBox.No,
+                    )
+                    if reply == QMessageBox.Yes:
+                        self._auto_install_package("openai")
+                else:
+                    QMessageBox.information(self, "成功", "验证成功！您的 DeepSeek API Key 有效且网络连接正常。")
             else:
                 QMessageBox.warning(self, "失败", f"验证失败：HTTP {resp.status_code}\n{resp.text}")
         except Exception as e:
@@ -625,40 +801,3 @@ class SettingsDialog(QDialog):
         finally:
             self.verify_ds_btn.setText("验证 DeepSeek 连接 (Verify)")
             self.verify_ds_btn.setEnabled(True)
-
-    def verify_zhipu(self):
-        from qgis.PyQt.QtCore import QCoreApplication
-        url = self.glm_url_input.text().strip() or "https://open.bigmodel.cn/api/paas/v4"
-        key = self.glm_key_input.text().strip()
-        if not key:
-            QMessageBox.warning(self, "错误", "请先输入 API Key！")
-            return
-            
-        self.verify_glm_btn.setText("验证中 (Verifying...)")
-        self.verify_glm_btn.setEnabled(False)
-        QCoreApplication.processEvents()
-        
-        import requests
-        try:
-            test_image_url = _build_glm_verify_image_data_url()
-            payload = {
-                "model": self.glm_vision_combo.currentData(),
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "请用四个字以内描述这张测试图。"},
-                        {"type": "image_url", "image_url": {"url": test_image_url}}
-                    ]
-                }],
-                "max_tokens": 8
-            }
-            resp = requests.post(f"{url}/chat/completions", headers={"Authorization": f"Bearer {key}"}, json=payload, timeout=10)
-            if resp.status_code == 200:
-                QMessageBox.information(self, "成功", "验证成功！您的智谱 API Key 有效且网络连接正常。")
-            else:
-                QMessageBox.warning(self, "失败", f"验证失败：HTTP {resp.status_code}\n{resp.text}")
-        except Exception as e:
-            QMessageBox.warning(self, "失败", f"请求异常：{str(e)}")
-        finally:
-            self.verify_glm_btn.setText("验证智谱连接 (Verify)")
-            self.verify_glm_btn.setEnabled(True)

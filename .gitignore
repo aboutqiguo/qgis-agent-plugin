@@ -36,3 +36,14 @@ qgis_agent_plugin/temp_images/
 *.tif
 *.shp
 *.geojson
+
+# Local dev artifacts
+backups/
+日志文件/
+MagicMock/
+.agents/
+.pytest_cache/
+symbology-style.db
+*.db
+参考项目/
+QGIS_AGENT_1.3.1_BETA_FULL_FUNCTION_API_SIM_TEST_AND_EXPERIMENT.md

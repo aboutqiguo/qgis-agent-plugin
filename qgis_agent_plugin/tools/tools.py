@@ -246,6 +246,116 @@ ATOMIC_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "compute_raster_zonal_stats",
+            "description": (
+                "Compute per-band statistics (min, max, mean, std) for a multi-band raster layer or file, "
+                "with optional binary mask target/background separability (Cohen's d, AUC) and automatic "
+                "ranking of the best normalized-difference index band pairs (Bi-Bj)/(Bi+Bj). Prefer this "
+                "over writing raw GDAL/NumPy scripts for band/mask statistics."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_layer_or_path": {
+                        "type": "string",
+                        "description": "Loaded QGIS raster layer name/id or absolute path to the raster file."
+                    },
+                    "mask_layer_or_path": {
+                        "type": "string",
+                        "description": "Optional binary mask layer name/id or raster file path."
+                    },
+                    "mask_valid_value": {
+                        "type": "number",
+                        "description": "Mask pixel value representing the target zone. Default 1."
+                    },
+                    "rank_band_pairs": {
+                        "type": "boolean",
+                        "description": "Rank all normalized-difference band pairs by |Cohen's d| and AUC when a mask is provided. Default true."
+                    }
+                },
+                "required": ["source_layer_or_path"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False,
+            "side_effects": ["read_only"],
+            "requires_qgis_main_thread": False
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_raster_index",
+            "description": (
+                "Safely compute a normalized-difference spectral index (Band_A - Band_B) / (Band_A + Band_B) "
+                "such as NDVI, NDWI, MNDWI, NDMI, NDBI, or NBR in float32. Automatically prevents UInt16 "
+                "integer underflow in gdal:rastercalculator, applies an optional binary mask, safely releases "
+                "Windows file locks if the output path is already loaded in QGIS, writes an LZW GeoTIFF, and "
+                "loads/validates the output layer."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_layer_or_path": {
+                        "type": "string",
+                        "description": "Loaded QGIS raster layer name/id or absolute path to the multi-band raster."
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Absolute output GeoTIFF (.tif) path."
+                    },
+                    "band_a": {
+                        "type": "integer",
+                        "description": "1-based band index for A in (A - B) / (A + B), e.g. NIR band for NDVI or Green band for NDWI."
+                    },
+                    "band_b": {
+                        "type": "integer",
+                        "description": "1-based band index for B in (A - B) / (A + B), e.g. Red band for NDVI or NIR/SWIR band for NDWI."
+                    },
+                    "index_name": {
+                        "type": "string",
+                        "description": "Band description / index label such as 'NDVI', 'NDWI', or 'NDMI'. Default 'INDEX'."
+                    },
+                    "mask_layer_or_path": {
+                        "type": "string",
+                        "description": "Optional binary mask layer name/id or file path; pixels != mask_valid_value become NoData (-9999)."
+                    },
+                    "mask_valid_value": {
+                        "type": "number",
+                        "description": "Mask pixel value treated as valid area. Default 1."
+                    },
+                    "clip_range": {
+                        "type": "boolean",
+                        "description": "Mask out-of-range values outside [-1, 1] as NoData. Default true."
+                    },
+                    "load_layer": {
+                        "type": "boolean",
+                        "description": "Load the resulting GeoTIFF into the active QGIS project. Default true."
+                    },
+                    "layer_name": {
+                        "type": "string",
+                        "description": "Optional QGIS layer name for the loaded output."
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Allow replacing an existing output file (safely unloading locked QGIS layers first). Default true."
+                    }
+                },
+                "required": ["source_layer_or_path", "output_path", "band_a", "band_b"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False,
+            "side_effects": ["file_write", "layer_creation", "project_mutation"],
+            "path_scope": "project_or_temp_output",
+            "requires_qgis_main_thread": True
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_gee_sentinel2_download_workflow",
             "description": (
                 "Download user-specified Sentinel-2 bands from Google Earth Engine after the user has explicitly confirmed "
@@ -257,19 +367,24 @@ ATOMIC_TOOLS_SCHEMA = [
                     "boundary_layer_name": {"type": "string", "description": "QGIS boundary layer name or id used as the study area."},
                     "output_dir": {"type": "string", "description": "Absolute output directory."},
                     "output_name": {"type": "string", "description": "Output GeoTIFF filename, e.g. yuhua_sentinel2_b4328.tif."},
-                    "collection_id": {"type": "string", "description": "Confirmed GEE ImageCollection id, e.g. COPERNICUS/S2_SR_HARMONIZED or COPERNICUS/S2_HARMONIZED."},
+                    "collection_id": {
+                        "type": "string",
+                        "enum": ["COPERNICUS/S2_SR_HARMONIZED", "COPERNICUS/S2_HARMONIZED"],
+                        "description": "Confirmed supported Sentinel-2 ImageCollection id."
+                    },
                     "start_date": {"type": "string", "description": "Confirmed start date YYYY-MM-DD."},
                     "end_date": {"type": "string", "description": "Confirmed end date YYYY-MM-DD."},
                     "bands": {"type": "array", "items": {"type": "string"}, "description": "Confirmed Sentinel-2 band names to export, e.g. B2,B3,B4,B8 or B4,B3,B2."},
                     "cloud_pct": {"type": "number", "description": "Confirmed maximum CLOUDY_PIXEL_PERCENTAGE."},
                     "scale": {"type": "number", "description": "Confirmed export scale in meters."},
+                    "crs": {"type": "string", "description": "Confirmed output CRS, e.g. EPSG:4326 or a local projected CRS."},
                     "processing_method": {"type": "string", "enum": ["median", "cloud_masked_median", "mosaic", "least_cloudy"], "description": "Confirmed processing method. Use cloud_masked_median only when user asks for cloud masking."},
                     "user_confirmed_parameters": {"type": "boolean", "description": "Must be true only after the user explicitly provided or confirmed all Sentinel-2 download parameters."},
                     "min_valid_percent": {"type": "number", "description": "Minimum valid pixel percent after download. Default 0.01."},
                     "load_layer": {"type": "boolean", "description": "Load the output layer into QGIS. Default true."},
                     "apply_renderer": {"type": "boolean", "description": "Reserved for future generic renderers. Default false."}
                 },
-                "required": ["boundary_layer_name", "output_dir", "collection_id", "start_date", "end_date", "bands", "cloud_pct", "scale", "processing_method", "user_confirmed_parameters"]
+                "required": ["boundary_layer_name", "output_dir", "output_name", "collection_id", "start_date", "end_date", "bands", "cloud_pct", "scale", "crs", "processing_method", "user_confirmed_parameters", "load_layer"]
             }
         },
         "metadata": {
@@ -296,12 +411,12 @@ ATOMIC_TOOLS_SCHEMA = [
                     "dataset_id": {"type": "string", "description": "Confirmed DEM dataset id. Supported: COPERNICUS/DEM/GLO30, NASA/NASADEM_HGT/001, USGS/SRTMGL1_003."},
                     "scale": {"type": "number", "description": "Confirmed export scale in meters. Default 30."},
                     "crs": {"type": "string", "description": "Confirmed output CRS. Default EPSG:4326."},
-                    "simplify_tolerance": {"type": "number", "description": "Optional boundary simplification tolerance in degrees before sending geometry to GEE. Default 0.001."},
+                    "simplify_tolerance": {"type": "number", "description": "Optional user-confirmed boundary simplification tolerance in degrees. Default 0 (no simplification)."},
                     "user_confirmed_parameters": {"type": "boolean", "description": "Must be true only after the user explicitly provided or approved DEM dataset, scale, CRS, and output name."},
                     "min_valid_percent": {"type": "number", "description": "Minimum valid pixel percent after download. Default 0.01."},
                     "load_layer": {"type": "boolean", "description": "Load the output DEM layer into QGIS. Default true."}
                 },
-                "required": ["boundary_layer_name", "output_dir", "output_name", "dataset_id", "scale", "crs", "user_confirmed_parameters"]
+                "required": ["boundary_layer_name", "output_dir", "output_name", "dataset_id", "scale", "crs", "user_confirmed_parameters", "load_layer"]
             }
         },
         "metadata": {
@@ -1087,6 +1202,115 @@ ATOMIC_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "load_external_layer",
+            "description": (
+                "Load a vector or raster file located outside the current QGIS project folder. "
+                "Reading the external source never modifies it. Set copy_to_project=true only when the user asks "
+                "to make a project-local streamed copy before loading."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "description": "Absolute path to an existing external data file."},
+                    "layer_name": {"type": "string", "description": "Optional QGIS layer name."},
+                    "layer_type": {"type": "string", "enum": ["auto", "vector", "raster"], "description": "Expected layer type. Default auto."},
+                    "copy_to_project": {"type": "boolean", "description": "Copy into the saved project folder before loading. Default false."},
+                    "target_file_name": {"type": "string", "description": "Optional destination file name when copy_to_project is true."},
+                    "overwrite": {"type": "boolean", "description": "Allow replacing an existing project-local copy. Default false."}
+                },
+                "required": ["source_path"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False,
+            "side_effects": ["read_only", "file_write", "layer_creation", "project_mutation"],
+            "path_scope": "external_read_or_project_copy"
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_osm_acquisition_workflow",
+            "description": (
+                "Continuously download and verify a named area's OSM boundary plus requested roads, buildings, POI, "
+                "waterways, and water polygons in one tool call. Prefer this when the user requests multiple OSM datasets."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "place_name": {"type": "string", "description": "Named place for Nominatim boundary lookup."},
+                    "output_dir": {"type": "string", "description": "Absolute output directory inside the project workspace."},
+                    "output_prefix": {"type": "string", "description": "Safe prefix for output files and QGIS layers."},
+                    "components": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["roads", "buildings", "poi", "waterways", "water"]},
+                        "description": "Requested components. Default includes all five components. Boundary is always downloaded first."
+                    },
+                    "max_chunk_area": {"type": "number", "description": "Maximum Overpass chunk area in square degrees. Default 0.25."},
+                    "overwrite": {"type": "boolean", "description": "Replace existing workflow outputs. Default false."},
+                    "continue_on_error": {"type": "boolean", "description": "Continue with independent components after one component fails. Default true."},
+                    "save_project": {"type": "boolean", "description": "Save and verify the QGIS project after successful acquisition. Default false."},
+                    "project_path": {"type": "string", "description": "Optional .qgz path used when save_project is true."}
+                },
+                "required": ["place_name", "output_dir", "output_prefix"]
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False,
+            "side_effects": ["network_request", "file_write", "layer_creation", "project_mutation"],
+            "path_scope": "project_or_temp_output"
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_qgis_layers_and_data",
+            "description": (
+                "Remove selected QGIS layers or every layer in the current project, and optionally delete their "
+                "file-backed source datasets. This is a destructive operation. Use it only after the user has "
+                "explicitly confirmed the scope. It never deletes the QGIS project file itself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["all_layers", "named_layers"],
+                        "description": "all_layers removes every currently loaded map layer. named_layers removes only layer_names."
+                    },
+                    "layer_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Exact layer names or layer IDs when scope is named_layers."
+                    },
+                    "delete_source_files": {
+                        "type": "boolean",
+                        "description": "Also delete local source datasets after removing layers. Remote, memory, and shared unselected sources are retained."
+                    },
+                    "delete_sidecars": {
+                        "type": "boolean",
+                        "description": "Delete recognised sidecar files (.shx/.dbf/.prj, world files, GPKG WAL/SHM) with a deleted source. Default true."
+                    },
+                    "save_project": {
+                        "type": "boolean",
+                        "description": "Persist removed layers to the current QGIS project. Default true."
+                    }
+                },
+                "required": ["scope", "delete_source_files"]
+            }
+        },
+        "metadata": {
+            "destructive": True,
+            "requires_confirmation": True,
+            "side_effects": ["file_delete", "project_mutation"],
+            "path_scope": "project_or_temp_output"
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_skill",
             "description": "Read the full contents of a skill card. Use this to understand specific business rules or API quirks before writing code.",
             "parameters": {
@@ -1138,16 +1362,173 @@ ATOMIC_TOOLS_SCHEMA = [
             "destructive": False,
             "requires_confirmation": False
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_or_update_user_tool",
+            "description": (
+                "Create or update a user-scoped executable tool candidate after the user explicitly approves "
+                "the requested capability. The source must define run(iface, arguments). This never edits "
+                "the plugin's core code and the candidate is not registered for future tasks until it passes "
+                "a test and register_user_tool_extension is approved."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "A unique user tool name beginning with user_, for example user_clear_cache_usage_log."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Concise capability, scope, expected output, and important side effects."
+                    },
+                    "parameters_schema": {
+                        "type": "object",
+                        "description": "JSON Schema object for the tool arguments. It must contain type=object, properties, and required."
+                    },
+                    "source_code": {
+                        "type": "string",
+                        "description": "Python source defining exactly run(iface, arguments). No markdown fences, subprocesses, package installation, or dynamic eval/exec."
+                    },
+                    "domains": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["osm", "gee", "processing", "mapping", "selection", "files", "workflow", "database", "general"]
+                        },
+                        "description": "Domains that should expose the registered tool in future task tool packs. Default general."
+                    }
+                },
+                "required": ["tool_name", "description", "parameters_schema", "source_code"]
+            }
+        },
+        "metadata": {
+            "destructive": True,
+            "requires_confirmation": True,
+            "requires_qgis_main_thread": False,
+            "side_effects": ["file_write", "code_execution"],
+            "path_scope": "user_extension"
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_user_tool_extension",
+            "description": (
+                "Run a user-scoped candidate or registered tool after approval. Use this to test a candidate "
+                "in the current task; only a successful and verified candidate can later be registered."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {"type": "string", "description": "The saved user_ tool name."},
+                    "arguments": {"type": "object", "description": "Arguments matching the candidate tool's parameters_schema."}
+                },
+                "required": ["tool_name"]
+            }
+        },
+        "metadata": {
+            "destructive": True,
+            "requires_confirmation": True,
+            "side_effects": ["code_execution"],
+            "path_scope": "user_extension"
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_user_tool_extension",
+            "description": (
+                "Register a successfully tested user tool for future tasks. Requires at least one successful "
+                "candidate execution and explicit approval. Registration takes effect only when a later task starts."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {"type": "string", "description": "The tested candidate tool name."},
+                    "verification_summary": {"type": "string", "description": "What was tested and which concrete result was verified."}
+                },
+                "required": ["tool_name", "verification_summary"]
+            }
+        },
+        "metadata": {
+            "destructive": True,
+            "requires_confirmation": True,
+            "requires_qgis_main_thread": False,
+            "side_effects": ["file_write"],
+            "path_scope": "user_extension"
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_user_tool_extensions",
+            "description": "List registered and candidate user-scoped executable tools without exposing their source code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_candidates": {"type": "boolean", "description": "Include unregistered candidate tools. Default true."}
+                },
+                "required": []
+            }
+        },
+        "metadata": {
+            "destructive": False,
+            "requires_confirmation": False,
+            "requires_qgis_main_thread": False,
+            "side_effects": ["read_only"],
+            "path_scope": "user_extension"
+        }
     }
 ]
 
-def execute_atomic_tool_structured(iface, tool_name, kwargs):
-    result = execute_atomic_tool(iface, tool_name, kwargs)
+def execute_atomic_tool_structured(
+    iface,
+    tool_name,
+    kwargs,
+    progress_callback=None,
+    cancel_callback=None,
+):
+    result = execute_atomic_tool(
+        iface,
+        tool_name,
+        kwargs,
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
+    )
     try:
         from ..core.tool_result import normalize_tool_output
         return normalize_tool_output(tool_name, result)
     except Exception:
         return result
+
+
+def _emit_acquisition_progress(
+    callback,
+    tool_name,
+    title,
+    stage,
+    stage_index,
+    stage_count,
+    stage_percent=None,
+    detail="",
+    state="running",
+):
+    from ..core.progress import emit_progress
+
+    return emit_progress(
+        callback,
+        tool_name=tool_name,
+        title=title,
+        stage=stage,
+        stage_index=stage_index,
+        stage_count=stage_count,
+        stage_percent=stage_percent,
+        detail=detail,
+        state=state,
+    )
 
 
 def _artifact_entry(path: str, artifact_type: str, description: str):
@@ -1170,7 +1551,28 @@ def _remove_existing_output(output_file: str) -> None:
     path = Path(output_file)
     if path.is_dir():
         raise ValueError(f"Refusing to overwrite directory output: {output_file}")
-    os.remove(output_file)
+    try:
+        from .qgis_tools.io_tools import _canonical_source
+        from qgis.core import QgsProject
+
+        target = _canonical_source(output_file).split("|", 1)[0]
+        project = QgsProject.instance()
+        remove_ids = []
+        for layer_id, layer in project.mapLayers().items():
+            try:
+                source = _canonical_source(layer.source()).split("|", 1)[0]
+                if source == target:
+                    remove_ids.append(layer_id)
+            except Exception:
+                continue
+        for layer_id in remove_ids:
+            project.removeMapLayer(layer_id)
+    except Exception:
+        pass
+    # GeoPackage is overwritten by QgsVectorFileWriter after loaded layers have
+    # been released. Other formats still require sidecar cleanup.
+    if path.suffix.lower() != ".gpkg":
+        os.remove(output_file)
     if path.suffix.lower() == ".shp":
         for suffix in (".dbf", ".shx", ".prj", ".cpg", ".qix"):
             sidecar = path.with_suffix(suffix)
@@ -1212,6 +1614,8 @@ def _save_vector_layer(layer, output_file: str, layer_name: str):
     options.driverName = driver
     if driver == "GPKG":
         options.layerName = layer_name
+        if os.path.exists(output_file):
+            options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteFile
     result = QgsVectorFileWriter.writeAsVectorFormatV2(
         layer,
         output_file,
@@ -1227,21 +1631,66 @@ def _save_vector_layer(layer, output_file: str, layer_name: str):
 
 
 def _bbox_from_layer(layer):
+    from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject
+
     extent = layer.extent()
+    if layer.crs().isValid() and layer.crs().authid() != "EPSG:4326":
+        transform = QgsCoordinateTransform(
+            layer.crs(),
+            QgsCoordinateReferenceSystem("EPSG:4326"),
+            QgsProject.instance(),
+        )
+        extent = transform.transformBoundingBox(extent)
     return (extent.xMinimum(), extent.yMinimum(), extent.xMaximum(), extent.yMaximum())
 
 
-def _execute_osm_feature_download(kwargs):
+def _deduplicate_vector_layer(layer, layer_name: str):
+    """Return an in-memory layer deduplicated by OSM id or exact geometry."""
+    from qgis.core import QgsFeature, QgsVectorLayer, QgsWkbTypes
+
+    crs = layer.crs().authid() if layer.crs().isValid() else "EPSG:4326"
+    geometry_name = QgsWkbTypes.displayString(layer.wkbType())
+    output = QgsVectorLayer(f"{geometry_name}?crs={crs}", layer_name, "memory")
+    provider = output.dataProvider()
+    provider.addAttributes(layer.fields())
+    output.updateFields()
+    field_names = [field.name() for field in layer.fields()]
+    osm_id_index = field_names.index("osm_id") if "osm_id" in field_names else -1
+    seen = set()
+    features = []
+    for source_feature in layer.getFeatures():
+        osm_id = source_feature.attribute(osm_id_index) if osm_id_index >= 0 else None
+        if osm_id not in (None, "", "NULL"):
+            key = ("osm_id", str(osm_id))
+        else:
+            geometry_key = bytes(source_feature.geometry().asWkb()) if source_feature.hasGeometry() else b""
+            key = ("geometry", geometry_key, tuple(str(value) for value in source_feature.attributes()))
+        if key in seen:
+            continue
+        seen.add(key)
+        feature = QgsFeature(output.fields())
+        feature.setAttributes(source_feature.attributes())
+        if source_feature.hasGeometry():
+            feature.setGeometry(source_feature.geometry())
+        features.append(feature)
+    provider.addFeatures(features)
+    output.updateExtents()
+    return output
+
+
+def _execute_osm_feature_download(kwargs, progress_callback=None, cancel_callback=None):
     import os
     import shutil
     import tempfile
     from ..bridges.osm_bridge import (
         OSMDownloader,
+        classify_overpass_error,
         build_bbox_query,
         parse_bbox,
         resolve_tag_template,
         safe_feature_count,
         split_bbox,
+        bbox_area,
     )
     from ..core.tool_result import ToolResult
     from ..core.validators import sanitize_file_stem
@@ -1252,8 +1701,16 @@ def _execute_osm_feature_download(kwargs):
     split_large_bbox = kwargs.get("split_large_bbox", True)
     max_chunk_area = float(kwargs.get("max_chunk_area", 0.25) or 0.25)
     tmp_dir = ""
+    tool_name = "download_osm_features"
+    title = "OSM 要素下载"
 
     try:
+        from ..core.progress import raise_if_cancelled
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "准备查询", 1, 5, 0,
+            "正在验证范围、标签和输出路径。",
+        )
+        raise_if_cancelled(cancel_callback, "OSM feature download was cancelled by the user.")
         _ensure_output_available(output_file, overwrite)
         tags, geometry_type = resolve_tag_template(
             preset=kwargs.get("preset", "buildings"),
@@ -1275,17 +1732,91 @@ def _execute_osm_feature_download(kwargs):
             bbox = parse_bbox(_bbox_from_layer(boundary_layer))
 
         chunks = split_bbox(bbox, max_area=max_chunk_area) if split_large_bbox else [bbox]
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "准备查询", 1, 5, 100,
+            f"已生成 {len(chunks)} 个初始下载分块。",
+        )
         tmp_dir = tempfile.mkdtemp(prefix="qgis_agent_osm_")
         loaded_layers = []
         chunk_records = []
 
-        for index, chunk in enumerate(chunks, start=1):
+        queue = list(chunks)
+        index = 0
+        while queue:
+            raise_if_cancelled(cancel_callback, "OSM feature download was cancelled by the user.")
+            chunk = queue.pop(0)
+            index += 1
+            completed_chunks = len(loaded_layers)
+            current_total = max(1, completed_chunks + len(queue) + 1)
+            _emit_acquisition_progress(
+                progress_callback,
+                tool_name,
+                title,
+                "下载 Overpass 分块",
+                2,
+                5,
+                completed_chunks / current_total * 100.0,
+                f"正在请求分块 {completed_chunks + 1}/{current_total}。",
+            )
             query = build_bbox_query(tags, chunk, geometry_type=geometry_type, timeout_seconds=180)
             chunk_osm = os.path.join(tmp_dir, f"{sanitize_file_stem(layer_name, 'osm')}_{index:03d}.osm")
-            OSMDownloader.query_osm(query, chunk_osm, timeout_seconds=180)
+
+            def _chunk_transfer(received, total, endpoint):
+                pending_total = max(1, len(loaded_layers) + len(queue) + 1)
+                if total > 0:
+                    current_ratio = min(1.0, max(0.0, received / total))
+                    stage_percent = (len(loaded_layers) + current_ratio) / pending_total * 100.0
+                    size_detail = f"{received / (1024 * 1024):.1f}/{total / (1024 * 1024):.1f} MB"
+                else:
+                    stage_percent = None
+                    size_detail = f"已接收 {received / (1024 * 1024):.1f} MB"
+                _emit_acquisition_progress(
+                    progress_callback,
+                    tool_name,
+                    title,
+                    "下载 Overpass 分块",
+                    2,
+                    5,
+                    stage_percent,
+                    f"分块 {len(loaded_layers) + 1}/{pending_total} · {size_detail} · {endpoint}",
+                )
+
+            try:
+                OSMDownloader.query_osm(
+                    query,
+                    chunk_osm,
+                    timeout_seconds=180,
+                    transfer_progress_callback=_chunk_transfer,
+                    cancel_callback=cancel_callback,
+                )
+            except Exception as chunk_exc:
+                error_type = getattr(chunk_exc, "error_type", "") or classify_overpass_error(str(chunk_exc))
+                area = bbox_area(chunk)
+                if split_large_bbox and error_type in {"overpass_timeout", "overpass_rate_limited"} and area > 0.0004 and len(queue) < 250:
+                    smaller = split_bbox(chunk, max_area=max(area / 4.0, 0.0001))
+                    queue = smaller + queue
+                    chunk_records.append({"index": index, "bbox": chunk, "status": "resplit", "error_type": error_type})
+                    continue
+                raise
             chunk_layer_name = f"{layer_name}_chunk_{index:03d}" if len(chunks) > 1 else layer_name
-            chunk_layer = OSMDownloader.load_osm_layer(chunk_osm, geometry_type, chunk_layer_name)
+            chunk_layer = OSMDownloader.load_osm_layer(
+                chunk_osm,
+                geometry_type,
+                chunk_layer_name,
+                add_to_project=False,
+            )
             loaded_layers.append(chunk_layer)
+            finished_total = max(1, len(loaded_layers) + len(queue))
+            _emit_acquisition_progress(
+                progress_callback,
+                tool_name,
+                title,
+                "下载 Overpass 分块",
+                2,
+                5,
+                len(loaded_layers) / finished_total * 100.0,
+                f"已完成 {len(loaded_layers)}/{finished_total} 个分块。",
+            )
             chunk_records.append(
                 {
                     "index": index,
@@ -1294,6 +1825,10 @@ def _execute_osm_feature_download(kwargs):
                 }
             )
 
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "合并并去重", 3, 5, 0,
+            f"正在整理 {len(loaded_layers)} 个分块。",
+        )
         if len(loaded_layers) == 1:
             source_layer = loaded_layers[0]
         else:
@@ -1309,7 +1844,24 @@ def _execute_osm_feature_download(kwargs):
             source_layer = merge_result["OUTPUT"]
             source_layer.setName(layer_name)
 
+        source_layer = _deduplicate_vector_layer(source_layer, layer_name)
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "合并并去重", 3, 5, 100,
+            "分块合并与 OSM 要素去重完成。",
+        )
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "写入输出文件", 4, 5, 0,
+            os.path.basename(output_file),
+        )
         load_uri = _save_vector_layer(source_layer, output_file, layer_name)
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "写入输出文件", 4, 5, 100,
+            os.path.basename(output_file),
+        )
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "加载并验证", 5, 5, 0,
+            f"正在加载图层 {layer_name}。",
+        )
         from .qgis_tools.io_tools import load_vector_layer
         try:
             final_layer = load_vector_layer(load_uri, layer_name, duplicate_policy="replace")
@@ -1323,6 +1875,10 @@ def _execute_osm_feature_download(kwargs):
             QgsProject.instance().addMapLayer(final_layer)
             final_layer.setName(layer_name)
         feature_count = safe_feature_count(final_layer)
+        _emit_acquisition_progress(
+            progress_callback, tool_name, title, "加载并验证", 5, 5, 100,
+            f"图层有效，要素数 {feature_count}。",
+        )
         artifacts = [_artifact_entry(output_file, "osm_output", "Final OSM vector output.")]
         return ToolResult.success(
             f"Downloaded OSM features to '{output_file}' and loaded layer '{layer_name}'.",
@@ -1332,7 +1888,7 @@ def _execute_osm_feature_download(kwargs):
                 "geometry_type": geometry_type,
                 "tags": tags,
                 "bbox": bbox,
-                "chunk_count": len(chunks),
+                "chunk_count": len(loaded_layers),
                 "chunks": chunk_records,
                 "feature_count": feature_count,
                 "temporary_files_cleaned": True,
@@ -1340,8 +1896,15 @@ def _execute_osm_feature_download(kwargs):
             artifacts=artifacts,
         ).to_dict()
     except Exception as exc:
+        from ..core.progress import DataAcquisitionCancelled
         from ..bridges.osm_bridge import classify_overpass_error
 
+        if isinstance(exc, DataAcquisitionCancelled):
+            return ToolResult.failure(
+                str(exc),
+                error_type="operation_cancelled",
+                data={"output_file": output_file, "layer_name": layer_name},
+            ).to_dict()
         error_type = getattr(exc, "error_type", None) or classify_overpass_error(str(exc))
         return ToolResult.failure(
             f"Failed to download OSM features: {exc}",
@@ -1444,6 +2007,183 @@ def _cleanup_qgis_project(kwargs):
     ).to_dict()
 
 
+def _remove_qgis_layers_and_data(kwargs):
+    """Remove explicit project layers and, only when requested, their local datasets."""
+    import os
+    from pathlib import Path
+
+    from ..core.tool_result import ToolResult
+    from qgis.core import QgsApplication, QgsProject
+
+    scope = str(kwargs.get("scope") or "").strip()
+    requested_names = {str(name).strip() for name in (kwargs.get("layer_names") or []) if str(name).strip()}
+    delete_sources = bool(kwargs.get("delete_source_files"))
+    delete_sidecars = kwargs.get("delete_sidecars", True) is not False
+    save_project = kwargs.get("save_project", True) is not False
+    project = QgsProject.instance()
+    all_layers = list(project.mapLayers().values())
+
+    if scope not in {"all_layers", "named_layers"}:
+        return ToolResult.failure(
+            "scope must be all_layers or named_layers.",
+            error_type="argument_error",
+            data={"scope": scope},
+        ).to_dict()
+    if scope == "named_layers" and not requested_names:
+        return ToolResult.failure(
+            "layer_names is required when scope is named_layers.",
+            error_type="argument_error",
+            data={"scope": scope},
+        ).to_dict()
+
+    selected_layers = all_layers if scope == "all_layers" else [
+        layer for layer in all_layers
+        if layer.id() in requested_names or layer.name() in requested_names
+    ]
+    selected_ids = {layer.id() for layer in selected_layers}
+    unmatched_names = sorted(requested_names - {
+        value for layer in selected_layers for value in (layer.id(), layer.name())
+    })
+    if unmatched_names:
+        return ToolResult.failure(
+            "No deletion was performed because one or more requested layer names/IDs are not present.",
+            error_type="qgis_layer_error",
+            data={
+                "unmatched_layer_names": unmatched_names,
+                "available_layers": [layer.name() for layer in all_layers],
+            },
+            suggestions=["Use exact layer names or IDs returned by summarize_layers before retrying."],
+        ).to_dict()
+
+    def source_path(layer):
+        try:
+            source = str(layer.source() or "").strip()
+        except Exception:
+            return "", "unreadable layer source"
+        if not source or source.lower().startswith("memory:"):
+            return "", "memory layer"
+        candidate = source.split("|", 1)[0].strip()
+        if (
+            "://" in candidate
+            or candidate.lower().startswith(("pg:", "wfs:", "mssql:", "oracle:", "oci:", "/vsi"))
+        ):
+            return "", "remote or virtual source"
+        if not os.path.isfile(candidate):
+            return "", "source is not a local file"
+        return os.path.abspath(os.path.normpath(candidate)), ""
+
+    all_source_users = {}
+    for layer in all_layers:
+        path, _reason = source_path(layer)
+        if path:
+            all_source_users.setdefault(path, set()).add(layer.id())
+
+    source_candidates = {}
+    skipped_sources = []
+    for layer in selected_layers:
+        path, reason = source_path(layer)
+        if not path:
+            if reason:
+                skipped_sources.append({"layer": layer.name(), "reason": reason})
+            continue
+        users = all_source_users.get(path, set())
+        if scope != "all_layers" and not users.issubset(selected_ids):
+            skipped_sources.append({
+                "layer": layer.name(),
+                "path": path,
+                "reason": "source is also used by a layer outside the requested scope",
+            })
+            continue
+        source_candidates[path] = {
+            "path": path,
+            "layers": sorted(
+                layer.name() for layer in selected_layers
+                if source_path(layer)[0] == path
+            ),
+        }
+
+    removed_layers = []
+    for layer in selected_layers:
+        try:
+            layer_name = layer.name()
+            layer_id = layer.id()
+        except Exception:
+            continue
+        try:
+            project.removeMapLayer(layer_id)
+            removed_layers.append({"name": layer_name, "id": layer_id})
+        except Exception as exc:
+            skipped_sources.append({"layer": layer_name, "reason": f"could not remove layer: {exc}"})
+
+    try:
+        QgsApplication.processEvents()
+    except Exception:
+        pass
+
+    removed_files = []
+    file_failures = []
+    if delete_sources:
+        sidecar_suffixes = {
+            ".shp": (".dbf", ".shx", ".prj", ".cpg", ".qix", ".sbn", ".sbx"),
+            ".tif": (".tfw", ".ovr"),
+            ".tiff": (".tfw", ".ovr"),
+            ".img": (".aux", ".ovr"),
+            ".gpkg": (".gpkg-wal", ".gpkg-shm"),
+        }
+        for source in source_candidates.values():
+            path = Path(source["path"])
+            targets = [path]
+            if delete_sidecars:
+                for suffix in sidecar_suffixes.get(path.suffix.lower(), ()):
+                    if suffix.startswith(".gpkg-"):
+                        targets.append(Path(str(path) + suffix[len(".gpkg"):]))
+                    else:
+                        targets.append(path.with_suffix(suffix))
+                for suffix in (".aux.xml",):
+                    targets.append(Path(str(path) + suffix))
+            for target in targets:
+                if not target.exists():
+                    continue
+                try:
+                    size = target.stat().st_size
+                    target.unlink()
+                    removed_files.append({"path": str(target), "size": size})
+                except Exception as exc:
+                    file_failures.append({"path": str(target), "error": str(exc)})
+
+    project_saved = None
+    if save_project and project.fileName():
+        try:
+            project_saved = bool(project.write())
+            if not project_saved:
+                file_failures.append({"path": project.fileName(), "error": "QGIS project write returned false"})
+        except Exception as exc:
+            file_failures.append({"path": project.fileName(), "error": f"could not save QGIS project: {exc}"})
+
+    data = {
+        "scope": scope,
+        "delete_source_files": delete_sources,
+        "removed_layers": removed_layers,
+        "removed_files": removed_files,
+        "skipped_sources": skipped_sources,
+        "unmatched_layer_names": unmatched_names,
+        "project_saved": project_saved,
+        "remaining_layer_count": len(project.mapLayers()),
+        "file_failures": file_failures,
+    }
+    if file_failures:
+        return ToolResult.failure(
+            "Layer removal completed partially, but one or more files or the project could not be removed/saved.",
+            error_type="partial_cleanup_error",
+            data=data,
+            suggestions=["Close file locks and retry only the failed paths; do not assume every source file was deleted."],
+        ).to_dict()
+    return ToolResult.success(
+        f"Removed {len(removed_layers)} layer(s) and {len(removed_files)} local file(s).",
+        data=data,
+    ).to_dict()
+
+
 def _validate_project_outputs(kwargs):
     import os
     from ..core.tool_result import ToolResult
@@ -1502,6 +2242,35 @@ def _validate_raster_has_data_tool(kwargs):
     )
 
 
+def _compute_raster_zonal_stats_tool(kwargs):
+    from ..core.raster_validation import compute_raster_zonal_stats
+
+    return compute_raster_zonal_stats(
+        source_layer_or_path=kwargs.get("source_layer_or_path", ""),
+        mask_layer_or_path=kwargs.get("mask_layer_or_path", ""),
+        mask_valid_value=float(kwargs.get("mask_valid_value", 1.0) if kwargs.get("mask_valid_value") is not None else 1.0),
+        rank_band_pairs=bool(kwargs.get("rank_band_pairs", True)),
+    )
+
+
+def _compute_raster_index_tool(kwargs):
+    from ..core.raster_validation import compute_raster_index
+
+    return compute_raster_index(
+        source_layer_or_path=kwargs.get("source_layer_or_path", ""),
+        output_path=kwargs.get("output_path", ""),
+        band_a=int(kwargs.get("band_a")),
+        band_b=int(kwargs.get("band_b")),
+        index_name=str(kwargs.get("index_name") or "INDEX"),
+        mask_layer_or_path=str(kwargs.get("mask_layer_or_path") or ""),
+        mask_valid_value=float(kwargs.get("mask_valid_value", 1.0) if kwargs.get("mask_valid_value") is not None else 1.0),
+        clip_range=bool(kwargs.get("clip_range", True)),
+        load_layer=bool(kwargs.get("load_layer", True)),
+        layer_name=str(kwargs.get("layer_name") or ""),
+        overwrite=bool(kwargs.get("overwrite", True)),
+    )
+
+
 def _boundary_layer_to_ee_geometry(layer, simplify_tolerance=0.0):
     import json
     import ee
@@ -1536,15 +2305,15 @@ def _boundary_layer_to_ee_geometry(layer, simplify_tolerance=0.0):
     return ee.Geometry(geojson)
 
 
-def _run_gee_dem_download_workflow(iface, kwargs):
+def _run_gee_dem_download_workflow(iface, kwargs, progress_callback=None, cancel_callback=None):
     import os
     import ee
-    from ..bridges.gee_bridge import GEEDownloader, init_gee
+    from ..bridges.gee_bridge import GEEDownloader, GEEManualDownloadRequired, init_gee
     from ..core.raster_validation import validate_raster_has_data
     from ..core.tool_result import ToolResult
     from qgis.core import QgsMapLayerType
 
-    required = ["boundary_layer_name", "output_dir", "output_name", "dataset_id", "scale", "crs"]
+    required = ["boundary_layer_name", "output_dir", "output_name", "dataset_id", "scale", "crs", "load_layer"]
     missing = [name for name in required if kwargs.get(name) in (None, "", [])]
     if missing or not kwargs.get("user_confirmed_parameters"):
         return ToolResult.failure(
@@ -1553,12 +2322,12 @@ def _run_gee_dem_download_workflow(iface, kwargs):
             data={
                 "missing": missing,
                 "user_confirmed_parameters": bool(kwargs.get("user_confirmed_parameters")),
-                "required_parameters": required + ["output_name", "user_confirmed_parameters"],
+                "required_parameters": required + ["user_confirmed_parameters"],
             },
             suggestions=[
                 "Call ask_human before downloading DEM data.",
                 "Ask the user to confirm DEM dataset, scale/resolution, output CRS, output name, and whether to load the layer.",
-                "Recommended default: COPERNICUS/DEM/GLO30, scale=30, crs=EPSG:4326.",
+                "Supported datasets are COPERNICUS/DEM/GLO30, NASA/NASADEM_HGT/001, and USGS/SRTMGL1_003.",
             ],
         ).to_dict()
 
@@ -1570,7 +2339,12 @@ def _run_gee_dem_download_workflow(iface, kwargs):
     output_name = kwargs.get("output_name") or "dem.tif"
     output_stem = os.path.splitext(os.path.basename(output_name))[0] or "dem"
     min_valid_percent = float(kwargs.get("min_valid_percent", 0.01) or 0.01)
-    simplify_tolerance = float(kwargs.get("simplify_tolerance", 0.001) or 0.001)
+    simplify_tolerance = float(kwargs.get("simplify_tolerance", 0.0) or 0.0)
+    progress_context = {
+        "tool_name": "run_gee_dem_download_workflow",
+        "title": "GEE DEM 数据获取",
+        "stage_count": 6,
+    }
 
     dem_catalog = {
         "COPERNICUS/DEM/GLO30": {
@@ -1614,7 +2388,21 @@ def _run_gee_dem_download_workflow(iface, kwargs):
         ).to_dict()
 
     try:
+        from ..core.progress import raise_if_cancelled
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "认证 Earth Engine", 1, 6, None, "正在初始化 Earth Engine 会话。",
+        )
+        raise_if_cancelled(cancel_callback, "GEE DEM acquisition was cancelled by the user.")
         init_gee()
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "认证 Earth Engine", 1, 6, 100, "Earth Engine 会话可用。",
+        )
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "构建 DEM 云端影像", 2, 6, None, f"数据集 {dataset_id}",
+        )
         ee_geometry = _boundary_layer_to_ee_geometry(boundary_layer, simplify_tolerance=simplify_tolerance)
         if spec["kind"] == "image_collection":
             image = ee.ImageCollection(dataset_id).mosaic().select(spec["band"])
@@ -1622,6 +2410,10 @@ def _run_gee_dem_download_workflow(iface, kwargs):
             image = ee.Image(dataset_id).select(spec["band"])
 
         export_image = image.clip(ee_geometry).toFloat()
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "构建 DEM 云端影像", 2, 6, 100, "裁剪影像表达式已构建。",
+        )
         os.makedirs(output_dir, exist_ok=True)
         output_path = GEEDownloader.download_ee_object(
             export_image,
@@ -1631,6 +2423,15 @@ def _run_gee_dem_download_workflow(iface, kwargs):
             region=ee_geometry,
             crs=crs,
             exact_geom=ee_geometry,
+            no_data=-9999,
+            min_coverage_ratio=max(0.0, min(1.0, min_valid_percent / 100.0)),
+            progress_callback=progress_callback,
+            progress_context=progress_context,
+            cancel_callback=cancel_callback,
+        )
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "验证本地栅格", 5, 6, None, os.path.basename(output_path),
         )
         validation = validate_raster_has_data(
             output_path,
@@ -1647,15 +2448,25 @@ def _run_gee_dem_download_workflow(iface, kwargs):
             ).to_dict()
 
         layer_id = ""
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "加载到 QGIS", 6, 6, 0,
+            "正在完成最终加载。" if kwargs.get("load_layer", True) else "用户选择不加载图层。",
+        )
         if kwargs.get("load_layer", True):
             from .qgis_tools import load_raster_layer
             layer_name = os.path.splitext(os.path.basename(output_path))[0]
             layer = load_raster_layer(output_path, layer_name, duplicate_policy="replace")
             layer_id = layer.id()
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "加载到 QGIS", 6, 6, 100, f"输出已验证{'并加载' if layer_id else ''}。",
+        )
 
         return ToolResult.success(
             "DEM download workflow completed and output raster was validated.",
             data={
+                "workflow_complete": True,
                 "output_path": output_path,
                 "layer_id": layer_id,
                 "dataset_id": dataset_id,
@@ -1669,7 +2480,27 @@ def _run_gee_dem_download_workflow(iface, kwargs):
             },
             artifacts=[_artifact_entry(output_path, "raster", "Validated DEM GeoTIFF.")],
         ).to_dict()
+    except GEEManualDownloadRequired as exc:
+        return ToolResult.failure(
+            str(exc),
+            error_type="manual_download_required",
+            data=exc.to_dict(),
+            suggestions=["Complete the listed Google Drive manual download steps, then validate and load the file."],
+        ).to_dict()
     except Exception as exc:
+        from ..core.progress import DataAcquisitionCancelled
+        if isinstance(exc, DataAcquisitionCancelled):
+            return ToolResult.failure(
+                str(exc),
+                error_type="operation_cancelled",
+                data={
+                    "boundary_layer_name": boundary_name,
+                    "output_dir": output_dir,
+                    "dataset_id": dataset_id,
+                    "cloud_export_may_continue": "task_id=" in str(exc),
+                },
+                suggestions=["Check Earth Engine Tasks before retrying; a submitted cloud export may still be running."],
+            ).to_dict()
         return ToolResult.failure(
             f"DEM download workflow failed: {exc}",
             error_type="gee_download_error",
@@ -1688,10 +2519,10 @@ def _run_gee_dem_download_workflow(iface, kwargs):
         ).to_dict()
 
 
-def _run_gee_sentinel2_download_workflow(iface, kwargs):
+def _run_gee_sentinel2_download_workflow(iface, kwargs, progress_callback=None, cancel_callback=None):
     import os
     import ee
-    from ..bridges.gee_bridge import GEEDownloader, init_gee
+    from ..bridges.gee_bridge import GEEDownloader, GEEManualDownloadRequired, init_gee
     from ..core.raster_validation import validate_raster_has_data
     from ..core.tool_result import ToolResult
     from qgis.core import QgsMapLayerType, QgsProject, QgsRasterLayer
@@ -1707,7 +2538,10 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
         "bands",
         "cloud_pct",
         "scale",
+        "crs",
         "processing_method",
+        "output_name",
+        "load_layer",
     ]
     missing = [name for name in required if kwargs.get(name) in (None, "", [])]
     if missing or not kwargs.get("user_confirmed_parameters"):
@@ -1749,8 +2583,26 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
     collection_id = kwargs.get("collection_id")
     processing_method = kwargs.get("processing_method")
     min_valid_percent = float(kwargs.get("min_valid_percent", 0.01) or 0.01)
-    output_name = kwargs.get("output_name") or f"sentinel2_{'_'.join(bands).lower()}_{start_date}_{end_date}.tif"
+    output_name = kwargs.get("output_name")
     output_stem = os.path.splitext(os.path.basename(output_name))[0] or "sentinel2_export"
+    output_crs = str(kwargs.get("crs") or "").strip()
+    progress_context = {
+        "tool_name": "run_gee_sentinel2_download_workflow",
+        "title": "GEE Sentinel-2 数据获取",
+        "stage_count": 6,
+    }
+
+    supported_collections = {
+        "COPERNICUS/S2_SR_HARMONIZED",
+        "COPERNICUS/S2_HARMONIZED",
+    }
+    if collection_id not in supported_collections:
+        return ToolResult.failure(
+            f"Unsupported Sentinel-2 collection_id: {collection_id}",
+            error_type="argument_error",
+            data={"collection_id": collection_id, "supported_collection_ids": sorted(supported_collections)},
+            suggestions=["Ask the user to choose one of the supported Sentinel-2 Harmonized collections."],
+        ).to_dict()
 
     if not bands:
         return ToolResult.failure(
@@ -1761,7 +2613,22 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
         ).to_dict()
 
     try:
+        from ..core.progress import raise_if_cancelled
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "认证 Earth Engine", 1, 6, None, "正在初始化 Earth Engine 会话。",
+        )
+        raise_if_cancelled(cancel_callback, "GEE Sentinel-2 acquisition was cancelled by the user.")
         init_gee()
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "认证 Earth Engine", 1, 6, 100, "Earth Engine 会话可用。",
+        )
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "筛选影像并构建合成", 2, 6, None,
+            f"{start_date} 至 {end_date} · 云量 < {cloud_pct}% · {','.join(bands)}",
+        )
         ee_geometry = _boundary_layer_to_ee_geometry(boundary_layer)
         collection = (
             ee.ImageCollection(collection_id)
@@ -1784,17 +2651,43 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
                 suggestions=["Relax cloud_pct or expand the date range, then retry."],
             ).to_dict()
 
+        available_bands = [str(value) for value in collection.first().bandNames().getInfo()]
+        missing_bands = [band for band in bands if band not in available_bands]
+        if missing_bands:
+            return ToolResult.failure(
+                "Requested Sentinel-2 bands do not exist in the selected collection.",
+                error_type="argument_error",
+                data={"missing_bands": missing_bands, "available_bands": available_bands, "collection_id": collection_id},
+                suggestions=["Ask the user to choose bands available in the confirmed Sentinel-2 collection."],
+            ).to_dict()
+
         if processing_method == "cloud_masked_median":
-            def _mask_s2_clouds(image):
-                scl = image.select("SCL")
-                mask = (
-                    scl.neq(3)
-                    .And(scl.neq(8))
-                    .And(scl.neq(9))
-                    .And(scl.neq(10))
-                    .And(scl.neq(11))
-                )
-                return image.updateMask(mask)
+            if "SCL" in available_bands:
+                def _mask_s2_clouds(image):
+                    scl = image.select("SCL")
+                    mask = (
+                        scl.neq(0)
+                        .And(scl.neq(1))
+                        .And(scl.neq(3))
+                        .And(scl.neq(8))
+                        .And(scl.neq(9))
+                        .And(scl.neq(10))
+                        .And(scl.neq(11))
+                    )
+                    return image.updateMask(mask)
+            elif "QA60" in available_bands:
+                def _mask_s2_clouds(image):
+                    qa = image.select("QA60")
+                    cloud_bit = 1 << 10
+                    cirrus_bit = 1 << 11
+                    return image.updateMask(qa.bitwiseAnd(cloud_bit).eq(0).And(qa.bitwiseAnd(cirrus_bit).eq(0)))
+            else:
+                return ToolResult.failure(
+                    "The selected Sentinel-2 collection has neither SCL nor QA60 for the requested cloud mask.",
+                    error_type="argument_error",
+                    data={"collection_id": collection_id, "available_bands": available_bands},
+                    suggestions=["Choose median without cloud masking or select a collection with SCL/QA60."],
+                ).to_dict()
             image = collection.map(_mask_s2_clouds).median()
         elif processing_method == "median":
             image = collection.median()
@@ -1809,7 +2702,12 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
                 data={"processing_method": processing_method},
             ).to_dict()
 
-        export_image = image.select(bands).clip(ee_geometry).unmask(-9999).toFloat()
+        export_image = image.select(bands).clip(ee_geometry).toFloat()
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "筛选影像并构建合成", 2, 6, 100,
+            f"匹配 {image_count} 景影像，处理方法 {processing_method}。",
+        )
         os.makedirs(output_dir, exist_ok=True)
         output_path = GEEDownloader.download_ee_object(
             export_image,
@@ -1817,8 +2715,17 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
             output_dir,
             scale=scale,
             region=ee_geometry,
-            crs="EPSG:4326",
+            crs=output_crs,
             exact_geom=ee_geometry,
+            no_data=-9999,
+            min_coverage_ratio=max(0.0, min(1.0, min_valid_percent / 100.0)),
+            progress_callback=progress_callback,
+            progress_context=progress_context,
+            cancel_callback=cancel_callback,
+        )
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "验证本地栅格", 5, 6, None, os.path.basename(output_path),
         )
         validation = validate_raster_has_data(
             output_path,
@@ -1835,21 +2742,25 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
             ).to_dict()
 
         layer_id = ""
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "加载到 QGIS", 6, 6, 0,
+            "正在完成最终加载。" if kwargs.get("load_layer", True) else "用户选择不加载图层。",
+        )
         if kwargs.get("load_layer", True):
+            from .qgis_tools import load_raster_layer
             layer_name = os.path.splitext(os.path.basename(output_path))[0]
-            layer = QgsRasterLayer(output_path, layer_name)
-            if not layer.isValid():
-                return ToolResult.failure(
-                    "Sentinel-2 GeoTIFF was created but QGIS could not load it.",
-                    error_type="qgis_layer_error",
-                    data={"output_path": output_path},
-                ).to_dict()
-            QgsProject.instance().addMapLayer(layer)
+            layer = load_raster_layer(output_path, layer_name, duplicate_policy="replace")
             layer_id = layer.id()
+        _emit_acquisition_progress(
+            progress_callback, progress_context["tool_name"], progress_context["title"],
+            "加载到 QGIS", 6, 6, 100, f"输出已验证{'并加载' if layer_id else ''}。",
+        )
 
         return ToolResult.success(
             "Sentinel-2 download workflow completed and output raster was validated.",
             data={
+                "workflow_complete": True,
                 "output_path": output_path,
                 "layer_id": layer_id,
                 "scene_count": image_count,
@@ -1859,12 +2770,33 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
                 "bands": bands,
                 "cloud_pct": cloud_pct,
                 "scale": scale,
+                "crs": output_crs,
                 "processing_method": processing_method,
                 "validation": validation,
             },
             artifacts=[_artifact_entry(output_path, "raster", "Validated Sentinel-2 GeoTIFF.")],
         ).to_dict()
+    except GEEManualDownloadRequired as exc:
+        return ToolResult.failure(
+            str(exc),
+            error_type="manual_download_required",
+            data=exc.to_dict(),
+            suggestions=["Complete the listed Google Drive manual download steps, then validate and load the file."],
+        ).to_dict()
     except Exception as exc:
+        from ..core.progress import DataAcquisitionCancelled
+        if isinstance(exc, DataAcquisitionCancelled):
+            return ToolResult.failure(
+                str(exc),
+                error_type="operation_cancelled",
+                data={
+                    "boundary_layer_name": boundary_name,
+                    "output_dir": output_dir,
+                    "collection_id": collection_id,
+                    "cloud_export_may_continue": "task_id=" in str(exc),
+                },
+                suggestions=["Check Earth Engine Tasks before retrying; a submitted cloud export may still be running."],
+            ).to_dict()
         return ToolResult.failure(
             f"Sentinel-2 download workflow failed: {exc}",
             error_type="gee_download_error",
@@ -1884,22 +2816,12 @@ def _run_gee_sentinel2_download_workflow(iface, kwargs):
         ).to_dict()
 
 
-def _run_qgis_workflow_batch(iface, kwargs):
+def _run_qgis_workflow_batch(iface, kwargs, progress_callback=None, cancel_callback=None):
     from ..core.tool_result import ToolResult
+    from ..core.tool_registry import BATCHABLE_TOOLS
+    from ..core.validators import validate_tool_call
 
-    allowed = {
-        "summarize_layers",
-        "cleanup_qgis_project",
-        "validate_project_outputs",
-        "inspect_raster_file",
-        "validate_raster_has_data",
-        "save_project_and_verify",
-        "download_osm_features",
-        "clip_vector_layers_to_boundary",
-        "run_gee_sentinel2_download_workflow",
-        "run_gee_dem_download_workflow",
-        "run_processing_algorithm",
-    }
+    allowed = BATCHABLE_TOOLS
     steps = list(kwargs.get("steps") or [])
     stop_on_error = kwargs.get("stop_on_error", True)
     results = []
@@ -1913,7 +2835,21 @@ def _run_qgis_workflow_batch(iface, kwargs):
                 data={"index": index, "action": action},
             ).to_dict()
         else:
-            result = execute_atomic_tool(iface, action, arguments)
+            validation = validate_tool_call(action, arguments)
+            if not validation.ok:
+                result = ToolResult.failure(
+                    f"Batch step {index} failed validation before execution.",
+                    error_type="argument_error",
+                    data={"index": index, "action": action, "validation": validation.to_dict()},
+                ).to_dict()
+            else:
+                result = execute_atomic_tool(
+                    iface,
+                    action,
+                    arguments,
+                    progress_callback=progress_callback,
+                    cancel_callback=cancel_callback,
+                )
         result_ok = bool(result.get("ok")) if isinstance(result, dict) else "error" not in str(result).lower()
         results.append({"index": index, "action": action, "ok": result_ok, "result": result})
         if stop_on_error and not result_ok:
@@ -1925,13 +2861,16 @@ def _run_qgis_workflow_batch(iface, kwargs):
     return ToolResult.failure(message, error_type="unknown_error", data={"steps": results}).to_dict()
 
 
-def execute_atomic_tool(iface, tool_name, kwargs):
+def execute_atomic_tool(iface, tool_name, kwargs, progress_callback=None, cancel_callback=None):
     try:
         if tool_name == "summarize_layers":
             return _summarize_layers(kwargs)
 
         if tool_name == "cleanup_qgis_project":
             return _cleanup_qgis_project(kwargs)
+
+        if tool_name == "remove_qgis_layers_and_data":
+            return _remove_qgis_layers_and_data(kwargs)
 
         if tool_name == "validate_project_outputs":
             return _validate_project_outputs(kwargs)
@@ -1942,14 +2881,131 @@ def execute_atomic_tool(iface, tool_name, kwargs):
         if tool_name == "validate_raster_has_data":
             return _validate_raster_has_data_tool(kwargs)
 
+        if tool_name == "compute_raster_zonal_stats":
+            return _compute_raster_zonal_stats_tool(kwargs)
+
+        if tool_name == "compute_raster_index":
+            return _compute_raster_index_tool(kwargs)
+
+        if tool_name == "create_or_update_user_tool":
+            from ..core.user_tool_extensions import create_or_update_user_tool
+
+            return create_or_update_user_tool(
+                tool_name=kwargs.get("tool_name", ""),
+                description=kwargs.get("description", ""),
+                parameters_schema=kwargs.get("parameters_schema", {}),
+                source_code=kwargs.get("source_code", ""),
+                domains=kwargs.get("domains") or ["general"],
+            )
+
+        if tool_name == "list_user_tool_extensions":
+            from ..core.user_tool_extensions import list_user_tools
+
+            rows = list_user_tools(include_candidates=kwargs.get("include_candidates", True))
+            return {
+                "ok": True,
+                "message": f"Found {len(rows)} user tool extension(s).",
+                "data": {"tools": rows},
+                "artifacts": [],
+                "warnings": [],
+            }
+
+        if tool_name == "run_user_tool_extension":
+            from ..core.user_tool_extensions import execute_user_tool, get_user_tool
+            from ..core.validators import validate_required, validate_schema_values
+
+            extension_name = kwargs.get("tool_name", "")
+            definition = get_user_tool(extension_name, include_candidates=True)
+            if definition is None:
+                return {
+                    "ok": False,
+                    "message": f"User tool '{extension_name}' is not available.",
+                    "data": {},
+                    "artifacts": [],
+                    "warnings": [],
+                    "error_type": "not_found",
+                    "suggestions": ["Create the candidate first or list available user tools."],
+                }
+            arguments = kwargs.get("arguments") or {}
+            required_report = validate_required(
+                arguments,
+                definition.get("parameters_schema", {}).get("required", []),
+            )
+            argument_report = validate_schema_values(arguments, definition.get("parameters_schema", {}))
+            if not required_report.ok or not argument_report.ok:
+                issues = required_report.to_dict().get("issues", []) + argument_report.to_dict().get("issues", [])
+                return {
+                    "ok": False,
+                    "message": "User tool arguments do not match its registered parameter schema.",
+                    "data": {"validation_issues": issues},
+                    "artifacts": [],
+                    "warnings": [],
+                    "error_type": "argument_error",
+                    "suggestions": ["Correct the arguments and retry the candidate test."],
+                }
+            return execute_user_tool(extension_name, iface, arguments)
+
+        if tool_name == "register_user_tool_extension":
+            from ..core.user_tool_extensions import register_user_tool
+
+            return register_user_tool(
+                tool_name=kwargs.get("tool_name", ""),
+                verification_summary=kwargs.get("verification_summary", ""),
+            )
+
         if tool_name == "run_gee_sentinel2_download_workflow":
-            return _run_gee_sentinel2_download_workflow(iface, kwargs)
+            return _run_gee_sentinel2_download_workflow(
+                iface,
+                kwargs,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+            )
 
         if tool_name == "run_gee_dem_download_workflow":
-            return _run_gee_dem_download_workflow(iface, kwargs)
+            return _run_gee_dem_download_workflow(
+                iface,
+                kwargs,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+            )
+
+        if tool_name == "run_osm_acquisition_workflow":
+            from .qgis_tools.workflow_tools import run_osm_acquisition_workflow
+
+            return run_osm_acquisition_workflow(
+                iface,
+                place_name=kwargs.get("place_name", ""),
+                output_dir=kwargs.get("output_dir", ""),
+                output_prefix=kwargs.get("output_prefix", ""),
+                components=kwargs.get("components"),
+                max_chunk_area=kwargs.get("max_chunk_area", 0.25),
+                overwrite=kwargs.get("overwrite", False),
+                continue_on_error=kwargs.get("continue_on_error", True),
+                save_project=kwargs.get("save_project", False),
+                project_path=kwargs.get("project_path", ""),
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+            )
+
+        if tool_name == "load_external_layer":
+            from .qgis_tools.external_data import load_external_layer
+
+            return load_external_layer(
+                source_path=kwargs.get("source_path", ""),
+                layer_name=kwargs.get("layer_name", ""),
+                layer_type=kwargs.get("layer_type", "auto"),
+                copy_to_project=kwargs.get("copy_to_project", False),
+                target_file_name=kwargs.get("target_file_name", ""),
+                overwrite=kwargs.get("overwrite", False),
+            )
 
         if tool_name == "run_qgis_workflow_batch":
-            return _run_qgis_workflow_batch(iface, kwargs)
+            return _run_qgis_workflow_batch(
+                iface,
+                kwargs,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+            )
 
         if tool_name == "repair_common_qgis_code_issues":
             from ..core.code_repair import repair_common_qgis_code_issues
@@ -2390,8 +3446,12 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                         ),
                     ).to_dict()
             except Exception as validation_exc:
-                # Keep this as a soft guard so older QGIS builds can still run existing workflows.
-                pass
+                return ToolResult.failure(
+                    f"Processing catalog validation failed internally: {validation_exc}",
+                    error_type="processing_error",
+                    data={"alg_id": alg_id, "parameters": params},
+                    suggestions=["Rebuild the processing catalog and describe the algorithm before retrying."],
+                ).to_dict()
             try:
                 from ..core.validators import validate_processing_request
                 validation = validate_processing_request(alg_id, params)
@@ -2401,13 +3461,37 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                         error_type="processing_error",
                         data={"alg_id": alg_id, "parameters": params, "validation": validation.to_dict()},
                     ).to_dict()
-            except Exception:
-                pass
-            is_gdal_algorithm = str(alg_id).lower().startswith("gdal:")
-            
-            for k, v in params.items():
-                if v == "TEMPORARY_OUTPUT" and not is_gdal_algorithm:
-                    params[k] = "memory:"
+            except Exception as validation_exc:
+                return ToolResult.failure(
+                    f"Processing request validation failed internally: {validation_exc}",
+                    error_type="processing_error",
+                    data={"alg_id": alg_id, "parameters": params},
+                ).to_dict()
+            provider_prefix = str(alg_id).split(":", 1)[0].lower() if ":" in str(alg_id) else ""
+            is_external_provider = provider_prefix in {"gdal", "grass", "grass7", "saga"}
+            exec_params = dict(params)
+
+            def _resolve_proc_input_value(val):
+                if not isinstance(val, str) or not val or val in ("TEMPORARY_OUTPUT", "memory:"):
+                    return val
+                if os.path.exists(val):
+                    return val
+                layer_obj = _find_project_layer(val)
+                if layer_obj is None:
+                    return val
+                if is_external_provider:
+                    src_file = str(layer_obj.source() or "").split("|", 1)[0]
+                    if src_file and os.path.exists(src_file):
+                        return src_file
+                return layer_obj
+
+            for k, v in list(exec_params.items()):
+                if v == "TEMPORARY_OUTPUT":
+                    exec_params[k] = "TEMPORARY_OUTPUT"
+                elif isinstance(v, str):
+                    exec_params[k] = _resolve_proc_input_value(v)
+                elif isinstance(v, list):
+                    exec_params[k] = [_resolve_proc_input_value(item) for item in v]
                     
             class EventPumpingFeedback(QgsProcessingFeedback):
                 def setProgress(self, progress):
@@ -2421,7 +3505,7 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                     processing.core.Processing.Processing.initialize()
                 except Exception:
                     pass
-                result = processing.run(alg_id, params, feedback=feedback)
+                result = processing.run(alg_id, exec_params, feedback=feedback)
                 output_summary = []
                 inspection = {}
                 try:
@@ -2463,6 +3547,26 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                     else:
                         output_summary.append(f"{k}: {v}")
                         
+                # Verify that any explicit file outputs actually exist on disk
+                missing_outputs = []
+                for param_k, param_v in params.items():
+                    if isinstance(param_v, str) and (param_v.lower().endswith(('.tif', '.tiff', '.shp', '.geojson', '.gpkg')) or os.path.isabs(param_v)):
+                        if param_v not in ("TEMPORARY_OUTPUT", "memory:") and not os.path.exists(param_v):
+                            missing_outputs.append((param_k, param_v))
+
+                if missing_outputs:
+                    return ToolResult.failure(
+                        f"Algorithm '{alg_id}' completed, but output file(s) were not created on disk: "
+                        + ", ".join(f"{k}='{v}'" for k, v in missing_outputs)
+                        + ". The backend (e.g. GRASS/GDAL) may have encountered memory limits or execution errors.",
+                        error_type="missing_output_file",
+                        data={"alg_id": alg_id, "parameters": params, "missing_outputs": missing_outputs},
+                        suggestions=[
+                            "Check memory allocation (e.g. memory=2000 for large DEMs in grass:r.watershed).",
+                            "Consider using QGIS native processing algorithms (like native:fillsinkswangliu) or a direct PyQGIS script.",
+                        ],
+                    ).to_dict()
+
                 return ToolResult.success(
                     f"Algorithm '{alg_id}' completed successfully.",
                     data={
@@ -2546,8 +3650,37 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                 ).to_dict()
                 
             try:
+                from ..core.progress import raise_if_cancelled
+                _emit_acquisition_progress(
+                    progress_callback,
+                    tool_name,
+                    "OSM 数据下载",
+                    "准备 Overpass 查询",
+                    1,
+                    4,
+                    0,
+                    "正在验证范围、标签和几何类型。",
+                )
+                raise_if_cancelled(cancel_callback, "OSM download was cancelled by the user.")
                 query = build_bbox_query(tags, (w, s, e, n), geometry_type=geometry_type, timeout_seconds=180)
+                _emit_acquisition_progress(
+                    progress_callback,
+                    tool_name,
+                    "OSM 数据下载",
+                    "准备 Overpass 查询",
+                    1,
+                    4,
+                    100,
+                    "查询已构建。",
+                )
             except Exception as exc:
+                from ..core.progress import DataAcquisitionCancelled
+                if isinstance(exc, DataAcquisitionCancelled):
+                    return ToolResult.failure(
+                        str(exc),
+                        error_type="operation_cancelled",
+                        data={"bbox": bbox_str, "tags": tags, "geometry_type": geometry_type},
+                    ).to_dict()
                 return ToolResult.failure(
                     f"Invalid OSM query parameters: {exc}",
                     error_type="argument_error",
@@ -2557,13 +3690,54 @@ def execute_atomic_tool(iface, tool_name, kwargs):
             try:
                 tmp_dir = tempfile.gettempdir()
                 file_path = os.path.join(tmp_dir, f"{safe_file_stem}.osm")
-                OSMDownloader.query_osm(query, file_path, timeout_seconds=180)
+
+                def _transfer_progress(received, total, endpoint):
+                    if total > 0:
+                        stage_percent = min(100.0, received / total * 100.0)
+                        detail = f"{received / (1024 * 1024):.1f}/{total / (1024 * 1024):.1f} MB · {endpoint}"
+                    else:
+                        stage_percent = None
+                        detail = f"已接收 {received / (1024 * 1024):.1f} MB · {endpoint}"
+                    _emit_acquisition_progress(
+                        progress_callback,
+                        tool_name,
+                        "OSM 数据下载",
+                        "下载 Overpass 响应",
+                        2,
+                        4,
+                        stage_percent,
+                        detail,
+                    )
+
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 数据下载", "下载 Overpass 响应", 2, 4, 0,
+                    "正在连接 Overpass 服务。",
+                )
+                OSMDownloader.query_osm(
+                    query,
+                    file_path,
+                    timeout_seconds=180,
+                    transfer_progress_callback=_transfer_progress,
+                    cancel_callback=cancel_callback,
+                )
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 数据下载", "解析 OSM 数据", 3, 4, 0,
+                    f"正在解析 {geometry_type} 子图层。",
+                )
                     
                 from .qgis_tools.io_tools import load_vector_layer
                 try:
                     uri = f"{file_path}|layername={geometry_type}"
                     layer = load_vector_layer(uri, layer_name)
+                    _emit_acquisition_progress(
+                        progress_callback, tool_name, "OSM 数据下载", "解析 OSM 数据", 3, 4, 100,
+                        f"图层 {layer_name} 已加载。",
+                    )
                     feature_count = safe_feature_count(layer)
+                    _emit_acquisition_progress(
+                        progress_callback, tool_name, "OSM 数据下载", "验证结果", 4, 4, 100,
+                        f"要素数 {feature_count}。",
+                    )
                     return ToolResult.success(
                         f"Successfully downloaded OSM data and loaded layer '{layer_name}'.",
                         data={
@@ -2602,6 +3776,13 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                     warnings=[f"Check Overpass debug files near {file_path} if they were created."],
                 ).to_dict()
             except Exception as e:
+                from ..core.progress import DataAcquisitionCancelled
+                if isinstance(e, DataAcquisitionCancelled):
+                    return ToolResult.failure(
+                        str(e),
+                        error_type="operation_cancelled",
+                        data={"bbox": bbox_str, "tags": tags, "layer_name": layer_name, "geometry_type": geometry_type},
+                    ).to_dict()
                 error_type = classify_overpass_error(str(e))
                 return ToolResult.failure(
                     f"Error downloading OSM data: {str(e)}",
@@ -2626,16 +3807,60 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                         error_type="argument_error",
                         data={"name": name, "output_file": output_file},
                     ).to_dict()
+                from ..core.progress import raise_if_cancelled
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 行政边界下载", "验证请求", 1, 4, 100,
+                    f"目标地名：{name}",
+                )
+                raise_if_cancelled(cancel_callback, "OSM boundary download was cancelled by the user.")
                 _ensure_output_available(output_file, overwrite)
                 iface.messageBar().pushMessage("OSM Boundary", f"Downloading boundary for {name}...", Qgis.MessageLevel.Info)
-                layer = OSMDownloader.download_boundary_nominatim(name, output_file, layer_name=layer_name)
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 行政边界下载", "查询 Nominatim", 2, 4, None,
+                    "正在检索具有面几何的行政区结果。",
+                )
+
+                def _boundary_transfer(received, total, endpoint):
+                    if total > 0:
+                        stage_percent = min(100.0, received / total * 100.0)
+                        detail = f"{received / 1024:.1f}/{total / 1024:.1f} KB · {endpoint}"
+                    else:
+                        stage_percent = None
+                        detail = f"已接收 {received / 1024:.1f} KB · {endpoint}"
+                    _emit_acquisition_progress(
+                        progress_callback, tool_name, "OSM 行政边界下载", "查询 Nominatim", 2, 4,
+                        stage_percent, detail,
+                    )
+
+                layer = OSMDownloader.download_boundary_nominatim(
+                    name,
+                    output_file,
+                    layer_name=layer_name,
+                    transfer_progress_callback=_boundary_transfer,
+                    cancel_callback=cancel_callback,
+                )
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 行政边界下载", "写入 GeoJSON", 3, 4, 100,
+                    os.path.basename(output_file),
+                )
                 feature_count = safe_feature_count(layer)
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 行政边界下载", "加载并验证", 4, 4, 100,
+                    f"图层有效，要素数 {feature_count}。",
+                )
                 return ToolResult.success(
                     f"Downloaded OSM boundary '{layer_name}' to {output_file}.",
                     data={"name": name, "output_file": output_file, "layer_name": layer_name, "feature_count": feature_count},
                     artifacts=[_artifact_entry(output_file, "osm_boundary", "Downloaded OSM/Nominatim boundary GeoJSON.")],
                 ).to_dict()
             except Exception as exc:
+                from ..core.progress import DataAcquisitionCancelled
+                if isinstance(exc, DataAcquisitionCancelled):
+                    return ToolResult.failure(
+                        str(exc),
+                        error_type="operation_cancelled",
+                        data={"name": name, "output_file": output_file, "layer_name": layer_name},
+                    ).to_dict()
                 return ToolResult.failure(
                     f"Failed to download OSM boundary: {exc}",
                     error_type="network_error",
@@ -2658,6 +3883,12 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                         error_type="argument_error",
                         data={"boundary_layer_name": boundary_layer_name, "output_file": output_file},
                     ).to_dict()
+                from ..core.progress import raise_if_cancelled
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 路网下载", "验证边界", 1, 4, 0,
+                    f"边界图层：{boundary_layer_name}",
+                )
+                raise_if_cancelled(cancel_callback, "OSM network download was cancelled by the user.")
                 _ensure_output_available(output_file, overwrite)
                 boundary_layer = _find_project_layer(boundary_layer_name)
                 if boundary_layer is None:
@@ -2666,9 +3897,56 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                         error_type="qgis_layer_error",
                         data={"boundary_layer_name": boundary_layer_name},
                     ).to_dict()
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 路网下载", "验证边界", 1, 4, 100,
+                    f"边界图层 {boundary_layer.name()} 有效。",
+                )
                 iface.messageBar().pushMessage("OSM Roads", f"Downloading {network_type} network...", Qgis.MessageLevel.Info)
-                layer = OSMDownloader.download_and_clean_network(boundary_layer, network_type, output_file)
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 路网下载", "构建 OSMnx 网络", 2, 4, None,
+                    "正在请求网络并构建拓扑，此阶段服务端不提供百分比。",
+                )
+
+                def _network_progress(stage_percent, detail):
+                    _emit_acquisition_progress(
+                        progress_callback, tool_name, "OSM 路网下载", "构建 OSMnx 网络", 2, 4,
+                        stage_percent, detail,
+                    )
+
+                try:
+                    layer = OSMDownloader.download_and_clean_network(
+                        boundary_layer,
+                        network_type,
+                        output_file,
+                        task_progress_callback=_network_progress,
+                        cancel_callback=cancel_callback,
+                    )
+                except Exception as net_exc:
+                    if "osmnx" not in str(net_exc).lower() and not isinstance(net_exc, ImportError):
+                        raise
+                    # Automatic zero-dependency fallback via chunked Overpass download
+                    fallback_preset = "waterways" if network_type == "water" else "roads"
+                    return _execute_osm_feature_download(
+                        {
+                            "boundary_layer_name": boundary_layer_name,
+                            "preset": fallback_preset,
+                            "output_file": output_file,
+                            "layer_name": os.path.splitext(os.path.basename(output_file))[0],
+                            "overwrite": overwrite,
+                            "split_large_bbox": True,
+                        },
+                        progress_callback=progress_callback,
+                        cancel_callback=cancel_callback,
+                    )
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 路网下载", "写入网络文件", 3, 4, 100,
+                    os.path.basename(output_file),
+                )
                 feature_count = safe_feature_count(layer)
+                _emit_acquisition_progress(
+                    progress_callback, tool_name, "OSM 路网下载", "加载并验证", 4, 4, 100,
+                    f"网络要素数 {feature_count}。",
+                )
                 return ToolResult.success(
                     f"Downloaded OSM {network_type} network to {output_file}.",
                     data={
@@ -2682,6 +3960,13 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                     artifacts=[_artifact_entry(output_file, "osm_network", "Downloaded and cleaned OSM network output.")],
                 ).to_dict()
             except Exception as exc:
+                from ..core.progress import DataAcquisitionCancelled
+                if isinstance(exc, DataAcquisitionCancelled):
+                    return ToolResult.failure(
+                        str(exc),
+                        error_type="operation_cancelled",
+                        data={"boundary_layer_name": boundary_layer_name, "output_file": output_file, "network_type": network_type},
+                    ).to_dict()
                 error_type = getattr(exc, "error_type", None) or classify_overpass_error(str(exc))
                 return ToolResult.failure(
                     f"Failed to download OSM network: {exc}",
@@ -2690,7 +3975,11 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                 ).to_dict()
 
         elif tool_name == "download_osm_features":
-            return _execute_osm_feature_download(kwargs)
+            return _execute_osm_feature_download(
+                kwargs,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+            )
 
         elif tool_name == "read_skill":
             import os
@@ -2773,6 +4062,10 @@ def execute_atomic_tool(iface, tool_name, kwargs):
                 return f"Successfully updated dynamic skill '{skill_name}'."
 
         else:
+            from ..core.user_tool_extensions import get_user_tool, execute_user_tool
+
+            if get_user_tool(tool_name, include_candidates=False) is not None:
+                return execute_user_tool(tool_name, iface, kwargs)
             return f"Unknown tool: {tool_name}"
     except Exception as e:
         import traceback

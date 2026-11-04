@@ -13,16 +13,36 @@ def render_quick_map(output_path: str, layers: list = None, width: int = 800, he
     if not layers:
         raise ValueError("No layers to render.")
         
+    from qgis.core import QgsCoordinateTransform
+
     settings = QgsMapSettings()
     settings.setLayers(layers)
     settings.setBackgroundColor(QColor(255, 255, 255))
     settings.setOutputSize(QSize(width, height))
+
+    target_crs = QgsProject.instance().crs()
+    if not target_crs.isValid() and layers:
+        for l in layers:
+            if hasattr(l, "crs") and l.crs().isValid():
+                target_crs = l.crs()
+                break
+    if target_crs.isValid():
+        settings.setDestinationCrs(target_crs)
     
-    # Calculate combined extent
+    # Calculate combined extent aligned to target_crs
     extent = QgsRectangle()
     extent.setMinimal()
     for layer in layers:
-        extent.combineExtentWith(layer.extent())
+        if not hasattr(layer, "extent") or layer.extent().isEmpty():
+            continue
+        l_extent = layer.extent()
+        if hasattr(layer, "crs") and layer.crs().isValid() and target_crs.isValid() and layer.crs() != target_crs:
+            try:
+                ct = QgsCoordinateTransform(layer.crs(), target_crs, QgsProject.instance())
+                l_extent = ct.transformBoundingBox(l_extent)
+            except Exception:
+                pass
+        extent.combineExtentWith(l_extent)
         
     # Add a 5% margin
     extent.scale(1.05)

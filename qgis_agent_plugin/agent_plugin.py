@@ -14,6 +14,7 @@ class QGISAIAgentPlugin:
         from .utils.logger import get_logger
         self.logger = get_logger()
         self.global_messages = []
+        self._pending_user_requests = []
         self._project_event_debounce_seconds = 1.2
         self._last_project_event_signature = None
         self._last_project_event_time = 0.0
@@ -92,8 +93,19 @@ class QGISAIAgentPlugin:
         self.dockwidget.show()
 
     def handle_stop_agent(self):
+        pending_count = len(self._pending_user_requests)
+        self._pending_user_requests.clear()
+        if pending_count and self.dockwidget:
+            self.dockwidget.append_message("SYSTEM", f"已取消 {pending_count} 个排队任务。")
         if self.harness_thread and self.harness_thread.isRunning():
             self.harness_thread.is_killed = True
+            if self.dockwidget:
+                self.dockwidget.operation_progress_signal.emit({
+                    "operation_id": "user_interrupted",
+                    "title": "任务已暂停",
+                    "state": "cancelled",
+                    "detail": "用户已点击暂停按钮",
+                })
             # Unblock any waiting events so it can die gracefully
             self.harness_thread.human_input_event.set()
             self.harness_thread.plan_approval_event.set()
@@ -104,45 +116,81 @@ class QGISAIAgentPlugin:
 
     def handle_user_message(self, message, model, effort, mode):
         from .core.harness_thread import HarnessThread
+        from .core.mode_state import (
+            build_gee_retry_message,
+            is_gee_retry_confirmation,
+            should_resume_approved_plan,
+        )
         if self.harness_thread and self.harness_thread.isRunning():
-            # Continuous Interaction (Insert Task)
-            self.logger.info("Injecting new user message into running thread.")
-            
-            # HOT FIX: Hot Switching Model and Mode mid-conversation
-            self.harness_thread.model_name = model
-            self.harness_thread.effort_level = effort
-            self.harness_thread.work_mode = mode
-            if mode == "PLAN":
-                self.harness_thread.plan_approved = False
-                self.harness_thread.plan_approval_response = ""
-            self.logger.info(f"Hot switched model to {model}, effort to {effort}, and mode to {mode}")
-            
-            self.harness_thread.messages.append({"role": "user", "content": message})
-            # If the thread is waiting for plan approval, auto-reject it to force re-planning with new context
-            # If the thread is waiting for plan approval, auto-reject it to force re-planning with new context
-            if not self.harness_thread.plan_approval_event.is_set():
-                self.harness_thread.plan_approval_response = "REJECT"
-                self.harness_thread.plan_approval_event.set()
+            self._pending_user_requests.append({
+                "message": message,
+                "model": model,
+                "effort": effort,
+                "mode": mode,
+            })
+            queue_position = len(self._pending_user_requests)
+            self.logger.info("Queued user request behind the active task. position=%s", queue_position)
+            if self.dockwidget:
+                self.dockwidget.append_message(
+                    "SYSTEM",
+                    f"当前任务仍在执行；新请求已排队（第 {queue_position} 个），将在当前任务完全结束后启动。",
+                )
             return
-            
+
+        resume_plan_payload = None
+        resume_project_home = ""
+        retry_message = ""
         if self.harness_thread:
-            try:
-                self.harness_thread.append_message_signal.disconnect()
-                self.harness_thread.finished_signal.disconnect()
-                self.harness_thread.request_human_input_signal.disconnect()
-                self.harness_thread.request_destructive_auth_signal.disconnect()
-                self.harness_thread.request_plan_approval_signal.disconnect()
-                self.harness_thread.request_code_execution_signal.disconnect()
-                self.harness_thread.request_canvas_image_signal.disconnect()
-                self.harness_thread.request_atomic_tool_signal.disconnect()
-            except TypeError:
-                pass
+            recovery_context = getattr(self.harness_thread, "recovery_context", None)
+            if is_gee_retry_confirmation(message, recovery_context):
+                retry_message = build_gee_retry_message(message, recovery_context)
+                self.harness_thread.recovery_context = None
+                self.logger.info("Resuming the last confirmed GEE workflow after user configuration acknowledgement.")
+            controller = getattr(self.harness_thread, "step_controller", None)
+            plan = getattr(controller, "plan", None)
+            has_active_step = bool(plan and plan.active_step())
+            if should_resume_approved_plan(
+                message,
+                mode,
+                self.harness_thread.plan_approved,
+                has_active_step,
+            ):
+                resume_plan_payload = plan.to_dict()
+                resume_project_home = getattr(controller, "project_home", "")
+
+        if self.harness_thread:
+            signal_slots = (
+                (self.harness_thread.append_message_signal, self.dockwidget.append_message),
+                (self.harness_thread.finished_signal, self.dockwidget.on_agent_finished),
+                (self.harness_thread.request_human_input_signal, self.handle_ask_human),
+                (self.harness_thread.request_destructive_auth_signal, self.handle_destructive_auth),
+                (self.harness_thread.request_plan_approval_signal, self.handle_request_plan_approval),
+                (self.harness_thread.request_code_execution_signal, self.handle_code_execution),
+                (self.harness_thread.request_canvas_image_signal, self.handle_canvas_image),
+                (self.harness_thread.request_atomic_tool_signal, self.handle_atomic_tool),
+                (self.harness_thread.metrics_signal, self.dockwidget.on_metrics_updated),
+                (self.harness_thread.finished, self._start_next_pending_request),
+            )
+            for signal, slot in signal_slots:
+                try:
+                    signal.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
                 
         self.harness_thread = HarnessThread(self.plugin_dir, existing_messages=self.global_messages)
-        self.harness_thread.user_input = message
+        self.harness_thread.user_input = retry_message or message
         self.harness_thread.model_name = model
         self.harness_thread.effort_level = effort
         self.harness_thread.work_mode = mode
+        if resume_plan_payload:
+            from .core.task_state import TaskPlan
+            self.harness_thread.plan_approved = True
+            self.harness_thread.step_controller.load_plan(
+                TaskPlan.from_dict(resume_plan_payload),
+                resume_project_home,
+                "",
+            )
+            self.logger.info("Resumed an approved, incomplete PLAN task for the new turn.")
         
         self.harness_thread.append_message_signal.connect(self.dockwidget.append_message)
         self.harness_thread.finished_signal.connect(self.dockwidget.on_agent_finished)
@@ -152,11 +200,93 @@ class QGISAIAgentPlugin:
         self.harness_thread.request_code_execution_signal.connect(self.handle_code_execution)
         self.harness_thread.request_canvas_image_signal.connect(self.handle_canvas_image)
         self.harness_thread.request_atomic_tool_signal.connect(self.handle_atomic_tool)
+        self.harness_thread.metrics_signal.connect(self.dockwidget.on_metrics_updated)
+        self.harness_thread.operation_progress_signal.connect(self.dockwidget.operation_progress_signal.emit)
+        self.harness_thread.finished.connect(self._start_next_pending_request)
         
         self.harness_thread.start()
 
+    def _start_next_pending_request(self):
+        if not self._pending_user_requests or not self.dockwidget:
+            return
+        request = self._pending_user_requests.pop(0)
+        remaining = len(self._pending_user_requests)
+        self.logger.info("Starting queued user request. remaining=%s", remaining)
+        self.dockwidget.append_message("SYSTEM", "当前任务已结束，正在启动下一条排队请求。")
+        self.dockwidget.set_agent_status("Agent is thinking...", is_running=True)
+
+        from qgis.PyQt.QtCore import QTimer
+        QTimer.singleShot(
+            0,
+            lambda request=request: self.handle_user_message(
+                request["message"],
+                request["model"],
+                request["effort"],
+                request["mode"],
+            ),
+        )
+
     def handle_atomic_tool(self, name, kwargs):
+        progress_callback = None
+        cancel_callback = None
+        operation_id = ""
+        is_acquisition = False
         try:
+            from .core.progress import DATA_ACQUISITION_TOOLS, emit_progress
+            is_acquisition = name in DATA_ACQUISITION_TOOLS
+            if is_acquisition:
+                operation_id = f"{name}:{time.monotonic_ns()}"
+                titles = {
+                    "download_osm_data": "OSM 数据下载",
+                    "download_osm_boundary": "OSM 行政边界下载",
+                    "download_osm_roads": "OSM 路网下载",
+                    "download_osm_features": "OSM 要素下载",
+                    "run_osm_acquisition_workflow": "连续 OSM 数据获取",
+                    "run_gee_sentinel2_download_workflow": "GEE Sentinel-2 数据获取",
+                    "run_gee_dem_download_workflow": "GEE DEM 数据获取",
+                }
+                title = titles.get(name, "数据获取")
+                last_log = {"signature": None, "time": 0.0}
+
+                def _publish_progress(event):
+                    payload = dict(event or {})
+                    payload["operation_id"] = operation_id
+                    if self.dockwidget:
+                        self.dockwidget.operation_progress_signal.emit(payload)
+                    signature = (
+                        payload.get("state"),
+                        payload.get("stage_index"),
+                        payload.get("stage"),
+                        int(float(payload.get("percent") or 0) // 10),
+                    )
+                    now = time.monotonic()
+                    if signature != last_log["signature"] or now - last_log["time"] >= 10.0:
+                        self.logger.info(
+                            "Acquisition progress: tool=%s state=%s stage=%s/%s %s percent=%s detail=%s",
+                            name,
+                            payload.get("state", "running"),
+                            payload.get("stage_index", 1),
+                            payload.get("stage_count", 1),
+                            payload.get("stage", ""),
+                            payload.get("percent"),
+                            payload.get("detail", ""),
+                        )
+                        last_log["signature"] = signature
+                        last_log["time"] = now
+
+                progress_callback = _publish_progress
+                cancel_callback = lambda: bool(self.harness_thread and self.harness_thread.is_killed)
+                emit_progress(
+                    progress_callback,
+                    tool_name=name,
+                    title=title,
+                    stage="准备参数",
+                    stage_index=1,
+                    stage_count=1,
+                    stage_percent=0,
+                    detail="正在启动数据获取工具。",
+                )
+
             if name == "take_qgis_window_snapshot":
                 import os, uuid
                 window = self.iface.mainWindow()
@@ -169,9 +299,46 @@ class QGISAIAgentPlugin:
                 result = f"[IMAGE_PATH]{img_path}"
             else:
                 from .tools.tools import execute_atomic_tool_structured
-                result = execute_atomic_tool_structured(self.iface, name, kwargs)
+                result = execute_atomic_tool_structured(
+                    self.iface,
+                    name,
+                    kwargs,
+                    progress_callback=progress_callback,
+                    cancel_callback=cancel_callback,
+                )
         except Exception as e:
             result = f"Error: {str(e)}"
+
+        if is_acquisition and progress_callback:
+            try:
+                from .core.progress import emit_progress
+                from .core.tool_result import parse_tool_result_payload
+                result_payload = parse_tool_result_payload(result) or {}
+                result_ok = bool(result_payload.get("ok"))
+                error_type = str(result_payload.get("error_type") or "")
+                state = "completed" if result_ok else "cancelled" if error_type == "operation_cancelled" else "failed"
+                message = result_payload.get("message", str(result))
+                emit_progress(
+                    progress_callback,
+                    tool_name=name,
+                    title={
+                        "download_osm_data": "OSM 数据下载",
+                        "download_osm_boundary": "OSM 行政边界下载",
+                        "download_osm_roads": "OSM 路网下载",
+                        "download_osm_features": "OSM 要素下载",
+                        "run_osm_acquisition_workflow": "连续 OSM 数据获取",
+                        "run_gee_sentinel2_download_workflow": "GEE Sentinel-2 数据获取",
+                        "run_gee_dem_download_workflow": "GEE DEM 数据获取",
+                    }.get(name, "数据获取"),
+                    stage="完成" if result_ok else "已取消" if state == "cancelled" else "失败",
+                    stage_index=1,
+                    stage_count=1,
+                    stage_percent=100 if result_ok else 0,
+                    detail=str(message)[:240],
+                    state=state,
+                )
+            except Exception:
+                pass
             
         if self.harness_thread:
             self.harness_thread.atomic_tool_response = result
@@ -385,44 +552,17 @@ class QGISAIAgentPlugin:
         f = io.StringIO()
         layer_snapshot_before = self._snapshot_project_layers()
         try:
-            import ast
-            class SecurityASTVisitor(ast.NodeVisitor):
-                def visit_Call(self, node):
-                    if isinstance(node.func, ast.Attribute) and node.func.attr == 'sleep':
-                        raise RuntimeError("UIFreezeError: 检测到 time.sleep() 或类似的轮询循环！这会彻底卡死 QGIS 主线程！请立刻停止手动轮询，必须改用 qgis_agent_plugin.gee_bridge.GEEDownloader 进行下载。")
-                    if isinstance(node.func, ast.Name) and node.func.id == 'sleep':
-                        raise RuntimeError("UIFreezeError: 检测到 sleep() 或类似的轮询循环！这会彻底卡死 QGIS 主线程！请立刻停止手动轮询，必须改用 qgis_agent_plugin.gee_bridge.GEEDownloader 进行下载。")
-                    self.generic_visit(node)
-                    
-            try:
-                tree = ast.parse(code)
-                SecurityASTVisitor().visit(tree)
-                
-                # Auto-inject QCoreApplication.processEvents() into all loops to prevent UI freeze
-                class LoopInjector(ast.NodeTransformer):
-                    def visit_For(self, node):
-                        self.generic_visit(node)
-                        stmt = ast.parse('import qgis.PyQt.QtCore as _qtcore; _qtcore.QCoreApplication.processEvents()').body
-                        node.body = stmt + node.body
-                        return node
-                    def visit_While(self, node):
-                        self.generic_visit(node)
-                        stmt = ast.parse('import qgis.PyQt.QtCore as _qtcore; _qtcore.QCoreApplication.processEvents()').body
-                        node.body = stmt + node.body
-                        return node
-                tree = LoopInjector().visit(tree)
-                ast.fix_missing_locations(tree)
-                if hasattr(ast, 'unparse'):
-                    code = ast.unparse(tree)
-            except Exception:
-                pass # Let exec() handle syntax errors
-                
             from qgis.PyQt.QtWidgets import QApplication
             from qgis.PyQt.QtCore import Qt
+            from .core.code_execution_guard import execute_main_thread_code
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
                 with redirect_stdout(f):
-                    exec(code, env_dict)
+                    execute_main_thread_code(
+                        code,
+                        env_dict,
+                        cancel_callback=lambda: bool(self.harness_thread and self.harness_thread.is_killed),
+                    )
             finally:
                 QApplication.restoreOverrideCursor()
                 
@@ -438,11 +578,7 @@ class QGISAIAgentPlugin:
             else:
                 output = f"Code executed successfully.{sys_logs}"
                 
-            if getattr(self, 'previous_execution_failed', False):
-                output += "\n\n[SYSTEM: 你的代码终于执行成功了！但这说明你刚才犯了错并完成了自我修正。在此刻，你【必须】立刻停下手中的主线任务，优先使用 write_file 工具将错误原因和修复代码写入 MEMORY.md！不准直接进行下一步！]"
-            self.previous_execution_failed = False
         except Exception:
-            self.previous_execution_failed = True
             stdout_str = f.getvalue().strip()
             tb = traceback.format_exc()
             if stdout_str:
@@ -464,8 +600,6 @@ class QGISAIAgentPlugin:
                             output += f"\n\n[GEE API FALLBACK (AUTO-RETRIEVED)]\nIt looks like a GEE API call failed. Here is the official signature for `{best_match}` (and related) to help you fix it:\n\n{fallback_info}"
                 except Exception:
                     pass
-                    
-            output += "\n\n[SYSTEM REMINDER: If you successfully fix this error in your next attempt, you MUST use the `replace_file_content` or `write_file` tool to document what went wrong and how you fixed it into `MEMORY.md` immediately!]"
         finally:
             # Always disconnect the interceptor
             try:
@@ -549,6 +683,8 @@ class QGISAIAgentPlugin:
         if self.harness_thread and self.harness_thread.isRunning():
             self.handle_stop_agent()
         self.load_memory()
+        if self.dockwidget:
+            self.dockwidget.reset_for_new_project()
 
     def load_memory(self, force=False):
         project_key = self._current_project_key()

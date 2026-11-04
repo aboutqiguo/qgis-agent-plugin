@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
-ARTIFACT_SCHEMA_VERSION = "2.0"
+ARTIFACT_SCHEMA_VERSION = "2.1"
 
 
 def _slugify(text: str, fallback: str = "task") -> str:
@@ -175,12 +175,28 @@ class AgentRunArtifacts:
         self.register_artifact(relative_path, _infer_artifact_type(relative_path), "copied_file", f"Copied from {source_path}.")
         return file_path
 
-    def write_result(self, ok: bool, summary: str, data: Optional[Dict[str, Any]] = None) -> str:
+    def write_result(
+        self,
+        ok: bool,
+        summary: str,
+        data: Optional[Dict[str, Any]] = None,
+        status: str = "",
+        reason: str = "",
+        failed_steps: Optional[List[str]] = None,
+        pending_steps: Optional[List[str]] = None,
+        pending_actions: Optional[List[str]] = None,
+    ) -> str:
+        status = status or ("succeeded" if ok else "failed")
         return self.write_json(
             "result.json",
             {
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
-                "ok": ok,
+                "status": status,
+                "ok": status == "succeeded",
+                "reason": reason,
+                "failed_steps": failed_steps or [],
+                "pending_steps": pending_steps or [],
+                "pending_actions": pending_actions or [],
                 "summary": summary,
                 "data": data or {},
             },
@@ -397,16 +413,34 @@ class AgentRunArtifacts:
         self,
         summary: str,
         ok: bool = True,
+        status: str = "",
+        reason: str = "",
+        failed_steps: Optional[List[str]] = None,
+        pending_steps: Optional[List[str]] = None,
+        pending_actions: Optional[List[str]] = None,
         layer_report_path: str = "",
         snapshot_path: str = "",
     ) -> str:
         outcome_markdown, has_attention_signal = self._build_outcome_signal_markdown(summary or "")
         token_summary = self.write_token_usage_summary()
-        status = "OK" if ok and not has_attention_signal else "Needs attention"
+        structured_status = status or ("succeeded" if ok else "failed")
+        status_labels = {
+            "succeeded": "Succeeded",
+            "partial": "Partial",
+            "awaiting_input": "Awaiting input",
+            "awaiting_approval": "Awaiting approval",
+            "awaiting_manual_download": "Awaiting manual download",
+            "blocked": "Blocked",
+            "cancelled": "Cancelled",
+            "failed": "Failed",
+        }
+        display_status = status_labels.get(structured_status, structured_status or "Unknown")
         lines = [
             "# QGIS Agent Run Report",
             "",
-            f"- Status: {status}",
+            f"- Status: {display_status}",
+            f"- Structured status: `{structured_status}`",
+            f"- Reason: {reason or '(not provided)'}",
             f"- Started at: {self.started_at.isoformat(timespec='seconds')}",
             f"- Finished at: {datetime.now().isoformat(timespec='seconds')}",
             f"- Run directory: `{self.run_dir}`",
@@ -452,6 +486,12 @@ class AgentRunArtifacts:
             "- Token summary: `token_summary.md`",
             "- Result: `result.json`",
         ]
+        if failed_steps:
+            lines.insert(13, f"- Failed steps: {', '.join(failed_steps)}")
+        if pending_steps:
+            lines.insert(13, f"- Pending steps: {', '.join(pending_steps)}")
+        if pending_actions:
+            lines.insert(13, f"- Pending actions: {'; '.join(pending_actions)}")
         if layer_report_path:
             lines.append(f"- Layer report: `{os.path.basename(layer_report_path)}`")
         if snapshot_path:
@@ -478,7 +518,9 @@ class AgentRunArtifacts:
 
     def _build_token_usage_summary(self) -> Dict[str, Any]:
         plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        token_log = os.path.join(plugin_root, "utils", "token_usage.jsonl")
+        run_token_log = self.path("token_usage.jsonl")
+        legacy_token_log = os.path.join(plugin_root, "utils", "token_usage.jsonl")
+        token_log = run_token_log if os.path.exists(run_token_log) else legacy_token_log
         rows = []
         if os.path.exists(token_log):
             try:
@@ -506,6 +548,10 @@ class AgentRunArtifacts:
         prompt_total = 0
         completion_total = 0
         total = 0
+        cache_hit_total = 0
+        cache_miss_total = 0
+        cache_known_requests = 0
+        estimated_savings = 0.0
         peak_total = 0
         model_counts: Dict[str, int] = {}
         for row in rows:
@@ -517,10 +563,19 @@ class AgentRunArtifacts:
             completion_total += completion
             total += row_total
             peak_total = max(peak_total, row_total)
+            cache_hit = usage.get("prompt_cache_hit_tokens")
+            cache_miss = usage.get("prompt_cache_miss_tokens")
+            if cache_hit is not None and cache_miss is not None:
+                cache_known_requests += 1
+                cache_hit_total += int(cache_hit or 0)
+                cache_miss_total += int(cache_miss or 0)
+            cost = row.get("cost_estimate") if isinstance(row.get("cost_estimate"), dict) else {}
+            estimated_savings += float(cost.get("estimated_savings") or 0)
             model = str(row.get("model") or usage.get("model") or "unknown")
             model_counts[model] = model_counts.get(model, 0) + 1
 
         request_count = len(rows)
+        cache_input_total = cache_hit_total + cache_miss_total
         return {
             "ok": True,
             "message": "Token usage summary generated." if request_count else "No token usage rows found for this run.",
@@ -533,6 +588,11 @@ class AgentRunArtifacts:
             "average_tokens_per_request": round(total / request_count, 2) if request_count else 0,
             "peak_tokens_single_request": peak_total,
             "prompt_token_share": round(prompt_total / total, 4) if total else 0,
+            "cache_known_requests": cache_known_requests,
+            "prompt_cache_hit_tokens": cache_hit_total,
+            "prompt_cache_miss_tokens": cache_miss_total,
+            "cache_hit_rate": round(cache_hit_total / cache_input_total, 4) if cache_input_total else None,
+            "estimated_savings_cny": round(estimated_savings, 6),
             "models": model_counts,
         }
 
@@ -547,6 +607,11 @@ class AgentRunArtifacts:
             f"- Average/request: {summary.get('average_tokens_per_request', 0)}",
             f"- Peak request: {summary.get('peak_tokens_single_request', 0)}",
             f"- Prompt share: {summary.get('prompt_token_share', 0)}",
+            f"- Cache-aware requests: {summary.get('cache_known_requests', 0)}",
+            f"- Cache-hit input tokens: {summary.get('prompt_cache_hit_tokens', 0)}",
+            f"- Cache-miss input tokens: {summary.get('prompt_cache_miss_tokens', 0)}",
+            f"- Cache hit rate: {summary.get('cache_hit_rate')}",
+            f"- Estimated cache savings (CNY): {summary.get('estimated_savings_cny', 0)}",
         ]
         models = summary.get("models") or {}
         if models:

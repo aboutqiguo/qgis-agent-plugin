@@ -1,36 +1,85 @@
+QGIS AI Agent Copilot v1.3.3 开发目录说明
+更新时间：2026-07-13
+
 qgis_agent_plugin/
-├── __init__.py               # 插件入口点 (QGIS 硬性要求)
-├── metadata.txt              # 插件元数据 (QGIS 硬性要求)
-├── agent_plugin.py           # 插件主类 (注册界面和核心引擎的桥梁)
+├── __init__.py                       QGIS 插件入口与 classFactory
+├── metadata.txt                     插件名称、版本、QGIS 兼容范围等元数据
+├── agent_plugin.py                  插件主类、菜单/停靠面板注册、主线程代码执行桥接
 │
-├── core/                     # 核心引擎层 (大模型交互、线程管理、记忆处理)
+├── bridges/                         外部数据服务桥接
 │   ├── __init__.py
-│   ├── harness_thread.py     # 大模型思考与执行后台线程
-│   ├── sqlite_memory.py      # SQLite 记忆库及 Auto-RAG 引擎
-│   └── logger.py             # 日志系统
+│   ├── gee_bridge.py                GEE 认证、direct/batch 路由、Drive API/同步/人工回退
+│   └── osm_bridge.py                Nominatim、Overpass、OSMnx、bbox 分块与错误分类
 │
-├── ui/                       # 用户界面层 (所有的可视化组件)
+├── core/                            Agent 核心控制层
 │   ├── __init__.py
-│   ├── chat_dockwidget.py    # 主对话停靠窗口
-│   └── settings_dialog.py    # 配置页面
+│   ├── approval_policy.py           高风险工具与代码模式审批策略
+│   ├── artifacts.py                 每轮运行产物、清单、报告、token 统计
+│   ├── code_repair.py               常见 PyQGIS 错误诊断和代码修复建议
+│   ├── data_sources.py              GIS 数据源手册和数据获取计划
+│   ├── gee_routing.py               Earth Engine direct/batch 纯路由估算
+│   ├── harness_thread.py            LLM 对话循环、工具路由、审批等待、上下文窗口
+│   ├── message_protocol.py          tool_calls/tool 消息序列验证与中断修复
+│   ├── planner.py                   Markdown/JSON 任务计划与 expected_outputs 推断
+│   ├── progress.py                  数据获取分阶段进度事件、百分比归一化和取消异常
+│   ├── processing_catalog.py        QGIS Processing/表达式能力目录数据库
+│   ├── project_persistence.py       工程保存和持久化验证
+│   ├── raster_validation.py         GeoTIFF 可读性、范围、波段、NoData/有效像元验证
+│   ├── result_inspector.py          Processing 和项目结果摘要检查
+│   ├── run_state.py                 结构化运行状态与保守完成判定
+│   ├── sqlite_memory.py             SQLite 对话记忆检索
+│   ├── step_runner.py               计划步骤执行门控与 verifier 协调
+│   ├── task_state.py                TaskPlan/TaskStep/StepVerification 数据结构
+│   ├── tool_registry.py             统一工具契约、风险、线程、批处理和能力分组
+│   ├── tool_result.py               ok/message/data/artifacts 结构化工具结果
+│   ├── validators.py                路径、参数、代码、GEE、OSM、批处理前置校验
+│   └── verifier.py                  文件、图层、栅格和运行产物验收
 │
-├── bridges/                  # 第三方生态桥接层 (网络服务通信)
+├── prompts/
+│   └── system_prompt.md             精简系统约束：工具优先、可验证完成、OSM/GEE 规则
+│
+├── skills/core/                     按需读取的声明式专业规则
+│   ├── gee_execution.md             GEE 参数确认、下载路由与验证
+│   ├── osm_nominatim.md             OSM/Nominatim 使用规则
+│   ├── qgis_gdal_quirks.md          QGIS/GDAL 兼容性和高频 API 注意事项
+│   ├── qgis_layout_design.md        制图布局规则
+│   └── qgis_projection_selection.md 投影选择规则
+│
+├── tools/
 │   ├── __init__.py
-│   ├── gee_bridge.py         # Google Earth Engine 认证与请求
-│   └── osm_bridge.py         # OpenStreetMap 工具
+│   ├── tools.py                     原子工具 schema、分发和 OSM/GEE/Processing 工作流
+│   └── qgis_tools/
+│       ├── __init__.py
+│       ├── geoprocessing_tools.py   缓冲/裁剪/投影及栅格裁剪
+│       ├── gui_tools.py             QGIS GUI 操作
+│       ├── io_tools.py              幂等矢量/栅格加载
+│       ├── mapping_tools.py         样式和地图操作
+│       └── workflow_tools.py        复合 QGIS 工作流
 │
-├── tools/                    # Agent 刀具库 (原子工具集)
+├── ui/
 │   ├── __init__.py
-│   ├── tools.py              # 工具注册中心 (Tool Registry)
-│   └── qgis_tools/           # (现有目录) QGIS 原生空间算法与操作工具
-│       ├── geoprocessing_tools.py
-│       ├── gui_tools.py
-│       ├── io_tools.py
-│       └── mapping_tools.py
+│   ├── chat_dockwidget.py           对话、任务、输入、主题适配和分阶段下载进度界面
+│   └── settings_dialog.py           DeepSeek、GLM、GEE、Drive 和更新设置
 │
-├── utils/                    # 通用工具层
-│   ├── __init__.py
-│   └── update_checker.py     # GitHub 热更新检查与下载逻辑
-│
-└── prompts/                  # 提示词库
-    └── system_prompt.md      # 系统核心 Prompt
+└── utils/
+    ├── __init__.py
+    ├── logger.py                    agent_run.log 轮转日志
+    └── update_checker.py            GitHub 版本检查与更新下载
+
+仓库级文件：
+- README.md                          GitHub 使用说明与 Changelog
+- plugins.xml                       QGIS 插件仓库索引信息
+- build.py                          读取 metadata 版本并生成安装 ZIP
+- tests/                            纯逻辑和工具契约模拟回归测试，不进入安装包
+- QGIS_AGENT_1.3.3_STABILITY_REPORT.md  本版本修复与测试报告
+
+运行时生成但不进入安装包：
+- qgis_agent_plugin/utils/agent_run.log
+- qgis_agent_plugin/utils/token_usage.jsonl
+- qgis_agent_plugin/core/qgis_processing_catalog.db 或 .sqlite
+- 项目目录/.qgis_agent_runs/
+- 项目目录/MEMORY.md、MEMORY_SUMMARY.md、RUN_INDEX.json
+
+打包排除：
+__pycache__、tests、test_data、temp_images、.idea、.git、.env、USER.md、
+*.pyc、*.pyo、*.log、*.db、*.sqlite、*.sqlite3、*.jsonl。

@@ -2,10 +2,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 
-REGISTRY_SCHEMA_VERSION = "2.0"
+REGISTRY_SCHEMA_VERSION = "2.3"
 
 
 READ_ONLY_TOOLS = {
+    "activate_domain_tools",
     "ask_human",
     "ask_vision_critic",
     "repair_common_qgis_code_issues",
@@ -35,12 +36,14 @@ READ_ONLY_TOOLS = {
     "validate_project_outputs",
     "inspect_raster_file",
     "validate_raster_has_data",
+    "compute_raster_zonal_stats",
     "take_qgis_window_snapshot",
+    "list_user_tool_extensions",
 }
 
 MEDIUM_RISK_TOOLS = {
-    "execute_pyqgis_script",
-    "install_python_package",
+    "load_external_layer",
+    "compute_raster_index",
     "run_processing_algorithm",
     "clip_vector_layers_to_boundary",
     "save_project_and_verify",
@@ -48,22 +51,54 @@ MEDIUM_RISK_TOOLS = {
     "run_qgis_workflow_batch",
     "run_gee_sentinel2_download_workflow",
     "run_gee_dem_download_workflow",
+    "run_osm_acquisition_workflow",
     "create_geodatabase",
     "download_osm_data",
     "download_osm_boundary",
     "download_osm_roads",
     "download_osm_features",
-    "save_skill",
-    "save_or_update_dynamic_skill",
     "submit_plan_for_approval",
 }
 
 HIGH_RISK_TOOLS = {
+    "remove_qgis_layers_and_data",
+    "execute_pyqgis_script",
+    "install_python_package",
     "replace_file_content",
     "write_file",
+    "save_skill",
+    "save_or_update_dynamic_skill",
+    "create_or_update_user_tool",
+    "run_user_tool_extension",
+    "register_user_tool_extension",
+}
+
+CONTROL_TOOLS = {
+    "activate_domain_tools",
+    "ask_human",
+    "submit_plan_for_approval",
+}
+
+BATCHABLE_TOOLS = {
+    "summarize_layers",
+    "cleanup_qgis_project",
+    "validate_project_outputs",
+    "inspect_raster_file",
+    "validate_raster_has_data",
+    "compute_raster_zonal_stats",
+    "compute_raster_index",
+    "save_project_and_verify",
+    "download_osm_features",
+    "clip_vector_layers_to_boundary",
+    "run_gee_sentinel2_download_workflow",
+    "run_gee_dem_download_workflow",
+    "run_processing_algorithm",
 }
 
 OUTPUT_TYPES = {
+    "activate_domain_tools": "tool_pack_status",
+    "remove_qgis_layers_and_data": "project_cleanup",
+    "load_external_layer": "layer_or_file",
     "ask_human": "text",
     "ask_vision_critic": "text",
     "execute_pyqgis_script": "execution_log",
@@ -88,9 +123,12 @@ OUTPUT_TYPES = {
     "validate_project_outputs": "validation_report",
     "inspect_raster_file": "raster_inspection",
     "validate_raster_has_data": "validation_report",
+    "compute_raster_zonal_stats": "raster_statistics",
+    "compute_raster_index": "layer_or_file",
     "run_qgis_workflow_batch": "workflow_report",
     "run_gee_sentinel2_download_workflow": "layer_or_file",
     "run_gee_dem_download_workflow": "layer_or_file",
+    "run_osm_acquisition_workflow": "layer_or_file",
     "create_geodatabase": "file",
     "download_osm_data": "layer",
     "download_osm_boundary": "layer",
@@ -113,9 +151,16 @@ OUTPUT_TYPES = {
     "create_data_acquisition_plan": "data_acquisition_plan",
     "submit_plan_for_approval": "plan",
     "take_qgis_window_snapshot": "image",
+    "create_or_update_user_tool": "user_tool_definition",
+    "run_user_tool_extension": "user_tool_result",
+    "register_user_tool_extension": "user_tool_registry",
+    "list_user_tool_extensions": "user_tool_list",
 }
 
 TOOL_CATEGORIES = {
+    "activate_domain_tools": "interaction",
+    "remove_qgis_layers_and_data": "project_cleanup",
+    "load_external_layer": "filesystem",
     "ask_human": "interaction",
     "ask_vision_critic": "vision",
     "execute_pyqgis_script": "execution",
@@ -147,9 +192,12 @@ TOOL_CATEGORIES = {
     "validate_project_outputs": "project_inspection",
     "inspect_raster_file": "raster_validation",
     "validate_raster_has_data": "raster_validation",
+    "compute_raster_zonal_stats": "geoprocessing",
+    "compute_raster_index": "geoprocessing",
     "run_qgis_workflow_batch": "workflow",
     "run_gee_sentinel2_download_workflow": "data_acquisition",
     "run_gee_dem_download_workflow": "data_acquisition",
+    "run_osm_acquisition_workflow": "data_acquisition",
     "create_geodatabase": "data_management",
     "download_osm_data": "data_acquisition",
     "download_osm_boundary": "data_acquisition",
@@ -170,6 +218,10 @@ TOOL_CATEGORIES = {
     "search_past_conversations": "memory",
     "submit_plan_for_approval": "planning",
     "take_qgis_window_snapshot": "vision",
+    "create_or_update_user_tool": "user_extensions",
+    "run_user_tool_extension": "user_extensions",
+    "register_user_tool_extension": "user_extensions",
+    "list_user_tool_extensions": "user_extensions",
 }
 
 NETWORK_TOOLS = {
@@ -183,6 +235,7 @@ NETWORK_TOOLS = {
     "download_osm_features",
     "run_gee_sentinel2_download_workflow",
     "run_gee_dem_download_workflow",
+    "run_osm_acquisition_workflow",
 }
 
 AUTH_TOOLS = {
@@ -194,6 +247,9 @@ AUTH_TOOLS = {
 }
 
 PROJECT_MUTATION_TOOLS = {
+    "remove_qgis_layers_and_data",
+    "load_external_layer",
+    "compute_raster_index",
     "execute_pyqgis_script",
     "run_processing_algorithm",
     "clip_vector_layers_to_boundary",
@@ -205,12 +261,15 @@ PROJECT_MUTATION_TOOLS = {
     "download_osm_features",
     "run_gee_sentinel2_download_workflow",
     "run_gee_dem_download_workflow",
+    "run_osm_acquisition_workflow",
     "zoom_to_layer",
     "set_layer_visibility",
     "select_features_by_expression",
     "clear_selection",
     "zoom_to_selected",
-    "take_qgis_window_snapshot",
+    "cleanup_qgis_project",
+    "run_qgis_workflow_batch",
+    "run_user_tool_extension",
 }
 
 LAYER_CONSUMING_TOOLS = {
@@ -221,6 +280,8 @@ LAYER_CONSUMING_TOOLS = {
     "select_features_by_expression",
     "clear_selection",
     "zoom_to_selected",
+    "compute_raster_zonal_stats",
+    "compute_raster_index",
     "run_processing_algorithm",
     "clip_vector_layers_to_boundary",
     "run_gee_sentinel2_download_workflow",
@@ -228,12 +289,17 @@ LAYER_CONSUMING_TOOLS = {
 }
 
 ARTIFACT_PRODUCING_TOOLS = {
+    "remove_qgis_layers_and_data",
+    "load_external_layer",
+    "compute_raster_index",
     "submit_plan_for_approval",
     "take_qgis_window_snapshot",
     "write_file",
     "replace_file_content",
     "save_skill",
     "save_or_update_dynamic_skill",
+    "create_or_update_user_tool",
+    "register_user_tool_extension",
     "create_data_acquisition_plan",
     "search_data_sources",
     "create_geodatabase",
@@ -245,15 +311,21 @@ ARTIFACT_PRODUCING_TOOLS = {
     "clip_vector_layers_to_boundary",
     "run_gee_sentinel2_download_workflow",
     "run_gee_dem_download_workflow",
+    "run_osm_acquisition_workflow",
     "save_project_and_verify",
 }
 
 APPROVAL_COVERED_TOOLS = {
+    "remove_qgis_layers_and_data",
     "execute_pyqgis_script",
+    "install_python_package",
     "write_file",
     "replace_file_content",
     "save_skill",
     "save_or_update_dynamic_skill",
+    "create_or_update_user_tool",
+    "run_user_tool_extension",
+    "register_user_tool_extension",
     "clip_vector_layers_to_boundary",
     "save_project_and_verify",
     "create_geodatabase",
@@ -263,6 +335,7 @@ APPROVAL_COVERED_TOOLS = {
     "download_osm_features",
     "run_gee_sentinel2_download_workflow",
     "run_gee_dem_download_workflow",
+    "run_osm_acquisition_workflow",
 }
 
 
@@ -283,6 +356,9 @@ class ToolSpec:
     produces_artifacts: Optional[bool] = None
     consumes_layers: Optional[bool] = None
     mutates_project: Optional[bool] = None
+    read_only: Optional[bool] = None
+    batchable: Optional[bool] = None
+    capability_group: str = ""
     examples: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -303,6 +379,12 @@ class ToolSpec:
             self.consumes_layers = self.name in LAYER_CONSUMING_TOOLS
         if self.mutates_project is None:
             self.mutates_project = self.name in PROJECT_MUTATION_TOOLS
+        if self.read_only is None:
+            self.read_only = self.name in READ_ONLY_TOOLS
+        if self.batchable is None:
+            self.batchable = self.name in BATCHABLE_TOOLS
+        if not self.capability_group:
+            self.capability_group = _infer_capability_group(self.name)
 
     def to_openai_tool(self) -> Dict[str, Any]:
         # Keep provider-facing schemas strict. Risk metadata is for the local registry only.
@@ -332,6 +414,9 @@ class ToolSpec:
             "produces_artifacts": bool(self.produces_artifacts),
             "consumes_layers": bool(self.consumes_layers),
             "mutates_project": bool(self.mutates_project),
+            "read_only": bool(self.read_only),
+            "batchable": bool(self.batchable),
+            "capability_group": self.capability_group,
             "examples": self.examples,
             "metadata": self.metadata,
         }
@@ -359,6 +444,7 @@ def _infer_requires_main_thread(name: str) -> bool:
         "repair_common_qgis_code_issues",
         "inspect_raster_file",
         "validate_raster_has_data",
+        "compute_raster_zonal_stats",
         "read_skill",
         "save_skill",
         "search_skills",
@@ -366,6 +452,8 @@ def _infer_requires_main_thread(name: str) -> bool:
         "search_data_sources",
         "create_data_acquisition_plan",
         "write_file",
+        "create_or_update_user_tool",
+        "register_user_tool_extension",
     }
 
 
@@ -377,9 +465,30 @@ def _infer_category(name: str) -> str:
     return TOOL_CATEGORIES.get(name, "general")
 
 
+def _infer_capability_group(name: str) -> str:
+    category = _infer_category(name)
+    if category in {"data_acquisition"}:
+        if "gee" in name:
+            return "gee"
+        if "osm" in name:
+            return "osm"
+        return "data"
+    if category in {"geoprocessing", "selection"}:
+        return "processing"
+    if category in {"raster_validation"}:
+        return "raster"
+    if category in {"map_navigation", "vision"}:
+        return "mapping"
+    if category in {"documentation", "code_repair"}:
+        return "diagnostics"
+    if category in {"filesystem", "environment", "skills"}:
+        return "security"
+    return "project"
+
+
 def _infer_side_effects(name: str) -> List[str]:
     effects: List[str] = []
-    if name in {"execute_pyqgis_script"}:
+    if name in {"execute_pyqgis_script", "run_user_tool_extension"}:
         effects.append("code_execution")
     if name in {"install_python_package"}:
         effects.extend(["environment_mutation", "network_request"])
@@ -390,6 +499,8 @@ def _infer_side_effects(name: str) -> List[str]:
         "replace_file_content",
         "save_skill",
         "save_or_update_dynamic_skill",
+        "create_or_update_user_tool",
+        "register_user_tool_extension",
         "create_geodatabase",
         "clip_vector_layers_to_boundary",
         "save_project_and_verify",
@@ -398,9 +509,11 @@ def _infer_side_effects(name: str) -> List[str]:
         "download_osm_features",
         "run_gee_sentinel2_download_workflow",
         "run_gee_dem_download_workflow",
+        "run_osm_acquisition_workflow",
     }:
         effects.append("file_write")
     if name in {
+        "load_external_layer",
         "run_processing_algorithm",
         "download_osm_data",
         "download_osm_boundary",
@@ -411,6 +524,7 @@ def _infer_side_effects(name: str) -> List[str]:
         "save_project_and_verify",
         "run_gee_sentinel2_download_workflow",
         "run_gee_dem_download_workflow",
+        "run_osm_acquisition_workflow",
     }:
         effects.extend(["project_mutation", "layer_creation"])
     if name in {"zoom_to_layer", "set_layer_visibility", "select_features_by_expression", "clear_selection", "zoom_to_selected"}:
@@ -427,9 +541,17 @@ def _infer_side_effects(name: str) -> List[str]:
 def _infer_path_scope(name: str) -> str:
     if name in {"write_file", "replace_file_content", "read_file"}:
         return "agent_resolved_path"
+    if name in {
+        "create_or_update_user_tool",
+        "run_user_tool_extension",
+        "register_user_tool_extension",
+        "list_user_tool_extensions",
+    }:
+        return "user_extension"
     if name in {"save_skill", "save_or_update_dynamic_skill"}:
         return "project_or_plugin_skills"
     if name in {
+        "load_external_layer",
         "create_geodatabase",
         "run_processing_algorithm",
         "download_osm_data",
@@ -440,6 +562,7 @@ def _infer_path_scope(name: str) -> str:
         "save_project_and_verify",
         "run_gee_sentinel2_download_workflow",
         "run_gee_dem_download_workflow",
+        "run_osm_acquisition_workflow",
     }:
         return "project_or_temp_output"
     if name in NETWORK_TOOLS:
@@ -464,7 +587,10 @@ def spec_from_openai_tool(schema: Dict[str, Any]) -> ToolSpec:
         description=function.get("description", ""),
         args_schema=function.get("parameters", {"type": "object", "properties": {}, "required": []}),
         risk_level=_infer_risk_level(name, metadata),
-        requires_qgis_main_thread=_infer_requires_main_thread(name),
+        requires_qgis_main_thread=metadata.get(
+            "requires_qgis_main_thread",
+            _infer_requires_main_thread(name),
+        ),
         output_type=_infer_output_type(name),
         category=_infer_category(name),
         side_effects=list(metadata.get("side_effects") or []),
@@ -499,6 +625,49 @@ def build_atomic_tool_specs() -> List[ToolSpec]:
     return specs
 
 
+def build_registered_user_tool_specs() -> List[ToolSpec]:
+    """Load only previously verified user tools for the next task's frozen tool set."""
+
+    try:
+        from .user_tool_extensions import get_registered_user_tools
+
+        definitions = get_registered_user_tools()
+    except Exception:
+        return []
+
+    specs: List[ToolSpec] = []
+    for definition in definitions:
+        name = str(definition.get("tool_name", ""))
+        description = str(definition.get("description", ""))
+        args_schema = definition.get("parameters_schema")
+        if not name or not description or not isinstance(args_schema, dict):
+            continue
+        specs.append(
+            ToolSpec(
+                name=name,
+                description=description,
+                args_schema=args_schema,
+                version="user",
+                risk_level="high",
+                requires_qgis_main_thread=True,
+                output_type="user_tool_result",
+                category="user_extensions",
+                side_effects=["code_execution", "file_write", "project_mutation"],
+                path_scope="user_extension",
+                produces_artifacts=True,
+                mutates_project=True,
+                metadata={
+                    "user_extension": True,
+                    "requires_confirmation": True,
+                    "domains": definition.get("domains", []),
+                    "source_file": definition.get("source_file", ""),
+                    "registered_at": definition.get("registered_at", ""),
+                },
+            )
+        )
+    return sorted(specs, key=lambda spec: spec.name)
+
+
 def _object_schema(properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
     return {
         "type": "object",
@@ -510,10 +679,44 @@ def _object_schema(properties: Dict[str, Any], required: Optional[List[str]] = N
 def build_builtin_tool_specs() -> List[ToolSpec]:
     return [
         ToolSpec(
+            name="activate_domain_tools",
+            description=(
+                "Activate one or more built-in domain tool packs when the initial request was ambiguous and "
+                "the required registered tools are not currently visible. Use this before claiming a capability "
+                "gap or creating a user tool. Activation is deterministic, additive, and applies from the next "
+                "model round."
+            ),
+            args_schema=_object_schema(
+                {
+                    "domains": {
+                        "type": "array",
+                        "description": "Built-in domains to activate.",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "code", "database", "files", "gee", "mapping", "osm",
+                                "processing", "selection", "skills", "workflow",
+                            ],
+                        },
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Short explanation of why the initial task routing was insufficient.",
+                    },
+                },
+                ["domains", "reason"],
+            ),
+            risk_level="low",
+            requires_qgis_main_thread=False,
+            output_type="tool_pack_status",
+        ),
+        ToolSpec(
             name="execute_pyqgis_script",
             description=(
                 "Execute a Python script in the QGIS environment. Provide complete, executable raw code "
-                "without markdown formatting."
+                "without markdown formatting. This main-thread fallback is limited to short QGIS project/UI "
+                "operations; synchronous network, Processing, waits, unbounded loops, and dynamic execution "
+                "are rejected and execution is time-bounded."
             ),
             args_schema=_object_schema(
                 {
@@ -530,7 +733,7 @@ def build_builtin_tool_specs() -> List[ToolSpec]:
                 },
                 ["code", "is_destructive"],
             ),
-            risk_level="medium",
+            risk_level="high",
             requires_qgis_main_thread=True,
             output_type="execution_log",
         ),
@@ -545,7 +748,28 @@ def build_builtin_tool_specs() -> List[ToolSpec]:
                     "plan_markdown": {
                         "type": "string",
                         "description": "Full markdown plan and checklist. Use [ ], [/], [x].",
-                    }
+                    },
+                    "plan_json": {
+                        "type": "object",
+                        "description": "Optional typed plan. Each step should declare suggested_tools and expected_outputs.",
+                        "properties": {
+                            "objective": {"type": "string"},
+                            "steps": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "step_id": {"type": "string"},
+                                        "title": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "suggested_tools": {"type": "array", "items": {"type": "string"}},
+                                        "expected_outputs": {"type": "array", "items": {"type": "object"}},
+                                    },
+                                    "required": ["title"],
+                                },
+                            },
+                        },
+                    },
                 },
                 ["plan_markdown"],
             ),
@@ -648,7 +872,7 @@ def build_builtin_tool_specs() -> List[ToolSpec]:
                 },
                 ["skill_name", "description", "python_code"],
             ),
-            risk_level="medium",
+            risk_level="high",
             requires_qgis_main_thread=False,
             output_type="file",
         ),
@@ -680,7 +904,7 @@ def build_builtin_tool_specs() -> List[ToolSpec]:
 def build_all_tool_specs() -> List[ToolSpec]:
     seen = set()
     specs: List[ToolSpec] = []
-    for spec in build_builtin_tool_specs() + build_atomic_tool_specs():
+    for spec in build_builtin_tool_specs() + build_atomic_tool_specs() + build_registered_user_tool_specs():
         if spec.name in seen:
             continue
         seen.add(spec.name)
@@ -708,6 +932,7 @@ def build_all_tool_openai_schemas() -> List[Dict[str, Any]]:
 
 def get_atomic_tool_names(include_aliases: bool = True) -> List[str]:
     names = [spec.name for spec in build_atomic_tool_specs()]
+    names.extend(spec.name for spec in build_registered_user_tool_specs())
     if not include_aliases:
         names = [name for name in names if name != "search_gee_python_api"]
     return sorted(set(names))
@@ -750,9 +975,20 @@ def validate_registry_health(rows: Optional[List[Dict[str, Any]]] = None) -> Dic
         "produces_artifacts",
         "consumes_layers",
         "mutates_project",
+        "read_only",
+        "batchable",
+        "capability_group",
     }
     allowed_risks = {"low", "medium", "high"}
-    allowed_path_scopes = {"none", "agent_resolved_path", "project_or_plugin_skills", "project_or_temp_output", "network"}
+    allowed_path_scopes = {
+        "none",
+        "agent_resolved_path",
+        "external_read_or_project_copy",
+        "project_or_plugin_skills",
+        "project_or_temp_output",
+        "network",
+        "user_extension",
+    }
 
     for row in rows:
         name = row.get("name", "")
@@ -763,7 +999,8 @@ def validate_registry_health(rows: Optional[List[Dict[str, Any]]] = None) -> Dic
             issues.append({"level": "error", "tool": name, "message": f"Invalid risk level: {row.get('risk_level')}"})
         if row.get("path_scope") not in allowed_path_scopes:
             issues.append({"level": "warning", "tool": name, "message": f"Unexpected path scope: {row.get('path_scope')}"})
-        if row.get("risk_level") == "high" and name not in APPROVAL_COVERED_TOOLS:
+        is_user_extension = bool((row.get("metadata") or {}).get("user_extension"))
+        if row.get("risk_level") == "high" and name not in APPROVAL_COVERED_TOOLS and not is_user_extension:
             issues.append({"level": "error", "tool": name, "message": "High-risk tool is not explicitly covered by approval policy."})
         if row.get("requires_network") and "network_request" not in row.get("side_effects", []):
             issues.append({"level": "warning", "tool": name, "message": "Network tool should declare network_request side effect."})

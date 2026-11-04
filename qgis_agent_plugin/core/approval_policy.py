@@ -89,39 +89,124 @@ class ToolApprovalPolicy:
                 warnings,
             )
 
-        if tool_name == "execute_pyqgis_script":
-            code = args.get("code", "") or context.get("code", "")
-            code_risk_reason = self.code_risk_reason(code, bool(args.get("is_destructive")))
-            if code_risk_reason:
+        from .mode_state import (
+            normalize_mode,
+            MODE_READ_ONLY,
+            MODE_WORKSPACE_WRITE,
+            MODE_FULL_ACCESS,
+        )
+        mode = normalize_mode(context.get("mode", MODE_WORKSPACE_WRITE))
+        project_home = context.get("project_home", "") or os.getcwd()
+
+        # 1. FULL_ACCESS Mode: Autonomous execution, bypass per-tool approval
+        if mode == MODE_FULL_ACCESS:
+            return ApprovalDecision(
+                False,
+                risk_level,
+                "Full-access mode granted. Tool executed autonomously.",
+                warnings=warnings,
+            )
+
+        # 2. READ_ONLY Mode: Any mutating tool requires explicit approval
+        read_only_safe_tools = {
+            "ask_human",
+            "submit_plan_for_approval",
+            "report_final_answer",
+            "read_file",
+            "search_skills",
+            "search_past_conversations",
+            "check_project_status",
+            "get_layer_metadata",
+            "show_memory_status",
+            "query_osm_features",
+            "evaluate_map_visualization",
+            "export_project_artifacts",
+        }
+        if mode == MODE_READ_ONLY:
+            if tool_name not in read_only_safe_tools:
                 return self._decision(
                     True,
                     "high",
-                    code_risk_reason,
+                    f"Read-only mode blocks execution of mutating tool '{tool_name}' without explicit approval.",
+                    tool_name,
+                    args,
+                    warnings,
+                )
+
+        if tool_name == "execute_pyqgis_script":
+            code = args.get("code", "") or context.get("code", "")
+            code_risk_reason = self.code_risk_reason(code, bool(args.get("is_destructive")))
+            if self._matches_any(code, SUBPROCESS_CODE_PATTERNS) or self._matches_any(code, PACKAGE_INSTALL_CODE_PATTERNS):
+                return self._decision(
+                    True,
+                    "high",
+                    code_risk_reason or "The script attempts system command execution or package installation.",
                     tool_name,
                     args,
                     warnings,
                     preview=code,
                 )
-            return ApprovalDecision(False, risk_level, "Script did not match destructive patterns.", warnings=warnings)
+            if mode == MODE_WORKSPACE_WRITE:
+                return ApprovalDecision(
+                    False,
+                    risk_level,
+                    "Workspace permission granted for PyQGIS execution within project scope.",
+                    warnings=warnings,
+                )
+            return self._decision(
+                True,
+                "high",
+                code_risk_reason or "The tool executes arbitrary Python with access to QGIS, local files, and the network.",
+                tool_name,
+                args,
+                warnings,
+                preview=code,
+            )
+
+        if tool_name in {"create_or_update_user_tool", "run_user_tool_extension"}:
+            source_code = args.get("source_code", "") or context.get("source_code", "")
+            code_risk_reason = self.code_risk_reason(source_code, False)
+            return self._decision(
+                True,
+                "high",
+                code_risk_reason or (
+                    "The tool stores executable user-scoped Python. It remains a candidate until it is "
+                    "tested and separately registered."
+                ),
+                tool_name,
+                args,
+                warnings,
+                preview=source_code,
+            )
 
         if tool_name in {"write_file", "replace_file_content"}:
             file_path = context.get("resolved_file_path") or args.get("file_path", "")
             file_exists = bool(context.get("file_exists", False))
             managed_file = bool(context.get("managed_file", False))
-            if file_exists and not managed_file:
+            in_ws = self.is_in_workspace(file_path, project_home)
+
+            if in_ws or managed_file:
+                return ApprovalDecision(
+                    False,
+                    risk_level,
+                    "File operation is within project workspace or managed path.",
+                    warnings=warnings,
+                )
+
+            if file_exists:
                 return self._decision(
                     True,
                     "high",
-                    "The tool will modify an existing file that is not one of the agent-managed memory/task files.",
+                    "The tool will modify an existing file outside the project workspace.",
                     tool_name,
                     args,
                     warnings,
                     file_path=file_path,
                     preview=context.get("preview", args.get("content", "")),
                 )
-            return ApprovalDecision(False, risk_level, "File operation is within managed or newly-created path.", warnings=warnings)
+            return ApprovalDecision(False, risk_level, "File operation creates a new path outside workspace.", warnings=warnings)
 
-        if risk_level == "high":
+        if risk_level == "high" and mode != MODE_WORKSPACE_WRITE:
             return self._decision(
                 True,
                 "high",
@@ -132,6 +217,23 @@ class ToolApprovalPolicy:
             )
 
         return ApprovalDecision(False, risk_level, f"Tool risk is {risk_level}; no approval required.", warnings=warnings)
+
+    def is_in_workspace(self, file_path: str, workspace_dir: str) -> bool:
+        import tempfile
+        if not file_path:
+            return True
+        try:
+            abs_target = os.path.abspath(file_path).lower()
+            if workspace_dir:
+                abs_ws = os.path.abspath(workspace_dir).lower()
+                if os.path.commonpath([abs_target, abs_ws]) == abs_ws:
+                    return True
+            temp_dir = os.path.abspath(tempfile.gettempdir()).lower()
+            if os.path.commonpath([abs_target, temp_dir]) == temp_dir:
+                return True
+        except Exception:
+            pass
+        return False
 
     def is_destructive_code(self, code: str) -> bool:
         return self._matches_any(code, DESTRUCTIVE_CODE_PATTERNS)
@@ -185,6 +287,8 @@ class ToolApprovalPolicy:
             safe_args["content"] = self._shorten(str(safe_args["content"]))
         if "python_code" in safe_args:
             safe_args["python_code"] = self._shorten(str(safe_args["python_code"]))
+        if "source_code" in safe_args:
+            safe_args["source_code"] = self._shorten(str(safe_args["source_code"]))
         if "code" in safe_args:
             safe_args["code"] = self._shorten(str(safe_args["code"]))
 

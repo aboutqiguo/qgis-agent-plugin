@@ -164,6 +164,9 @@ def split_bbox(bbox, max_area: float = 0.25, max_chunk_area: float = None) -> li
     """Split bbox into a grid where each chunk is at most max_area square degrees."""
     if max_chunk_area is not None:
         max_area = max_chunk_area
+    max_area = float(max_area)
+    if not 0 < max_area <= 5.0:
+        raise ValueError("max_area must be greater than 0 and no more than 5 square degrees.")
     min_lon, min_lat, max_lon, max_lat = parse_bbox(bbox)
     area = bbox_area((min_lon, min_lat, max_lon, max_lat))
     if area <= max_area:
@@ -238,7 +241,14 @@ def _write_overpass_debug_files(output_file: str, query: str, response_text: str
 
 class OSMDownloader:
     @staticmethod
-    def query_osm(overpass_ql: str, output_file: str, timeout_seconds: int = 180, endpoints=None):
+    def query_osm(
+        overpass_ql: str,
+        output_file: str,
+        timeout_seconds: int = 180,
+        endpoints=None,
+        transfer_progress_callback=None,
+        cancel_callback=None,
+    ):
         """
         Executes an Overpass QL query, ensuring the output is XML format, and saves to output_file.
         """
@@ -253,6 +263,8 @@ class OSMDownloader:
         last_error = None
 
         for endpoint in endpoint_list:
+            from ..core.progress import raise_if_cancelled
+            raise_if_cancelled(cancel_callback, "OSM download was cancelled by the user.")
             manager = QNetworkAccessManager()
             request = QNetworkRequest(QUrl(endpoint))
             request.setHeader(QNetworkRequest.ContentTypeHeader, "application/x-www-form-urlencoded; charset=UTF-8")
@@ -267,8 +279,11 @@ class OSMDownloader:
 
             loop = QEventLoop()
             timed_out = {"value": False}
+            cancelled = {"value": False}
             timer = QTimer()
             timer.setSingleShot(True)
+            cancel_timer = QTimer()
+            cancel_timer.setInterval(250)
 
             def _timeout():
                 timed_out["value"] = True
@@ -279,11 +294,39 @@ class OSMDownloader:
                 loop.quit()
 
             reply = manager.post(request, QByteArray(body))
+            if transfer_progress_callback:
+                def _transfer_progress(received, total, current_endpoint=endpoint):
+                    try:
+                        transfer_progress_callback(int(received), int(total), current_endpoint)
+                    except Exception:
+                        pass
+                reply.downloadProgress.connect(_transfer_progress)
+
+            def _check_cancel():
+                try:
+                    should_cancel = bool(cancel_callback and cancel_callback())
+                except Exception:
+                    should_cancel = False
+                if should_cancel:
+                    cancelled["value"] = True
+                    try:
+                        reply.abort()
+                    except Exception:
+                        pass
+                    loop.quit()
+
             timer.timeout.connect(_timeout)
+            cancel_timer.timeout.connect(_check_cancel)
             reply.finished.connect(loop.quit)
             timer.start(int(timeout_seconds * 1000))
+            cancel_timer.start()
             loop.exec()
             timer.stop()
+            cancel_timer.stop()
+
+            if cancelled["value"]:
+                from ..core.progress import DataAcquisitionCancelled
+                raise DataAcquisitionCancelled("OSM download was cancelled by the user.")
 
             if timed_out["value"]:
                 last_error = OverpassQueryError(
@@ -317,6 +360,12 @@ class OSMDownloader:
                 )
                 continue
 
+            if transfer_progress_callback:
+                try:
+                    transfer_progress_callback(len(response_bytes), len(response_bytes), endpoint)
+                except Exception:
+                    pass
+
             os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
             with open(output_file, 'wb') as f:
                 f.write(response_bytes)
@@ -329,7 +378,7 @@ class OSMDownloader:
         raise OverpassQueryError("Overpass API failed without a detailed error.", error_type="overpass_error")
 
     @staticmethod
-    def load_osm_layer(osm_file: str, geometry_type: str, layer_name: str):
+    def load_osm_layer(osm_file: str, geometry_type: str, layer_name: str, add_to_project: bool = True):
         """
         Loads a specific geometry type from an .osm file using GDAL.
         geometry_type must be one of: 'points', 'lines', 'multilinestrings', 'multipolygons', 'other_relations'
@@ -342,9 +391,14 @@ class OSMDownloader:
             raise FileNotFoundError(f"OSM file not found: {osm_file}")
             
         uri = f"{osm_file}|layername={geometry_type}"
-        from ..tools.qgis_tools import load_vector_layer
         try:
-            layer = load_vector_layer(uri, layer_name)
+            if add_to_project:
+                from ..tools.qgis_tools import load_vector_layer
+                layer = load_vector_layer(uri, layer_name)
+            else:
+                layer = QgsVectorLayer(uri, layer_name, "ogr")
+                if not layer.isValid():
+                    raise ValueError("invalid OSM sublayer")
         except Exception:
             raise Exception(f"Failed to load OSM layer. Make sure the query actually returned {geometry_type}.")
 
@@ -363,36 +417,104 @@ class OSMDownloader:
         return layer
 
     @staticmethod
-    def download_boundary_nominatim(name: str, output_file: str, layer_name: str = None):
+    def download_boundary_nominatim(
+        name: str,
+        output_file: str,
+        layer_name: str = None,
+        transfer_progress_callback=None,
+        cancel_callback=None,
+        timeout_seconds: int = 120,
+    ):
         """
         Downloads a GeoJSON boundary from Nominatim API for the given name (e.g., '长沙县').
         Saves it to output_file and loads it into QGIS as a vector layer.
         """
         import json
-        from urllib import request, parse
+        from urllib import parse
+        from qgis.PyQt.QtCore import QByteArray, QEventLoop, QTimer, QUrl
+        from qgis.PyQt.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
         
         if not layer_name:
             layer_name = f"{name}_boundary"
             
         url = f"https://nominatim.openstreetmap.org/search?q={parse.quote(name)}&polygon_geojson=1&format=json"
         
-        req = request.Request(url, headers={'User-Agent': 'QGISAgentPlugin/1.0'})
         _safe_push_message("Nominatim", f"Searching for boundary of {name}...", Qgis.MessageLevel.Info)
-        
+
+        manager = QNetworkAccessManager()
+        request = QNetworkRequest(QUrl(url))
+        request.setRawHeader(b"User-Agent", b"QGISAgentPlugin/1.3.3 (QGIS geodata client)")
+        if hasattr(request, "setTransferTimeout"):
+            try:
+                request.setTransferTimeout(int(timeout_seconds * 1000))
+            except Exception:
+                pass
+
+        loop = QEventLoop()
+        timeout_timer = QTimer()
+        timeout_timer.setSingleShot(True)
+        cancel_timer = QTimer()
+        cancel_timer.setInterval(250)
+        timed_out = {"value": False}
+        cancelled = {"value": False}
+        reply = manager.get(request)
+
+        def _timeout():
+            timed_out["value"] = True
+            reply.abort()
+            loop.quit()
+
+        def _check_cancel():
+            try:
+                should_cancel = bool(cancel_callback and cancel_callback())
+            except Exception:
+                should_cancel = False
+            if should_cancel:
+                cancelled["value"] = True
+                reply.abort()
+                loop.quit()
+
+        if transfer_progress_callback:
+            def _transfer(received, total):
+                try:
+                    transfer_progress_callback(int(received), int(total), "https://nominatim.openstreetmap.org")
+                except Exception:
+                    pass
+            reply.downloadProgress.connect(_transfer)
+        timeout_timer.timeout.connect(_timeout)
+        cancel_timer.timeout.connect(_check_cancel)
+        reply.finished.connect(loop.quit)
+        timeout_timer.start(int(timeout_seconds * 1000))
+        cancel_timer.start()
+        loop.exec()
+        timeout_timer.stop()
+        cancel_timer.stop()
+
+        if cancelled["value"]:
+            from ..core.progress import DataAcquisitionCancelled
+            raise DataAcquisitionCancelled("OSM boundary download was cancelled by the user.")
+        if timed_out["value"]:
+            raise Exception(f"Nominatim request timed out after {timeout_seconds}s.")
+        if reply.error() != QNetworkReply.NoError:
+            raise Exception(f"Nominatim API Error: {reply.errorString()}")
         try:
-            with request.urlopen(req) as response:
-                data = json.loads(response.read().decode('utf-8'))
+            response_bytes = reply.readAll().data()
+            data = json.loads(response_bytes.decode("utf-8"))
+            if transfer_progress_callback:
+                transfer_progress_callback(len(response_bytes), len(response_bytes), "https://nominatim.openstreetmap.org")
         except Exception as e:
-            raise Exception(f"Nominatim API Error: {str(e)}")
+            raise Exception(f"Nominatim response parsing failed: {str(e)}")
             
         if not data:
             raise Exception(f"No results found for '{name}' via Nominatim API.")
             
         # Find the first result that has a Polygon or MultiPolygon geojson
         geojson_feature = None
+        selected_item = None
         for item in data:
             if 'geojson' in item and item['geojson']['type'] in ['Polygon', 'MultiPolygon']:
                 geojson_feature = item['geojson']
+                selected_item = item
                 break
                 
         if not geojson_feature:
@@ -404,7 +526,7 @@ class OSMDownloader:
             "features": [
                 {
                     "type": "Feature",
-                    "properties": {"name": name, "display_name": data[0].get("display_name", "")},
+                    "properties": {"name": name, "display_name": (selected_item or {}).get("display_name", "")},
                     "geometry": geojson_feature
                 }
             ]
@@ -424,9 +546,15 @@ class OSMDownloader:
         return layer
 
     @staticmethod
-    def download_and_clean_network(bbox_layer: QgsVectorLayer, network_type: str, output_path: str):
+    def download_and_clean_network(
+        bbox_layer: QgsVectorLayer,
+        network_type: str,
+        output_path: str,
+        task_progress_callback=None,
+        cancel_callback=None,
+    ):
         """
-        Robustly downloads a network (roads or water) using OSMnx for perfect topology.
+        Downloads a network (roads or water) with OSMnx and preserves its graph topology.
         """
         from qgis.utils import iface
         from qgis.core import Qgis, QgsProject, QgsVectorLayer
@@ -436,7 +564,7 @@ class OSMDownloader:
             import geopandas as gpd
             import shapely.wkt
         except ImportError:
-            raise Exception("缺失核心空间图论分析库！请在您的 Python 环境中运行: `pip install osmnx geopandas`")
+            raise Exception("缺少 osmnx/geopandas。请停止当前任务，并在用户批准后使用 install_python_package 安装允许的依赖。")
             
         if network_type not in ['roads', 'water']:
             raise ValueError("network_type must be 'roads' or 'water'")
@@ -447,7 +575,18 @@ class OSMDownloader:
         if not features:
             raise Exception("边界图层为空，无法裁剪！")
             
-        geom = features[0].geometry()
+        from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry
+        geometries = [feature.geometry() for feature in features if feature.hasGeometry() and not feature.geometry().isEmpty()]
+        if not geometries:
+            raise Exception("边界图层没有有效几何，无法下载网络！")
+        geom = QgsGeometry.unaryUnion(geometries)
+        if bbox_layer.crs().isValid() and bbox_layer.crs().authid() != "EPSG:4326":
+            transform = QgsCoordinateTransform(
+                bbox_layer.crs(),
+                QgsCoordinateReferenceSystem("EPSG:4326"),
+                QgsProject.instance(),
+            )
+            geom.transform(transform)
         polygon = shapely.wkt.loads(geom.asWkt())
         
         output_dir = os.path.dirname(os.path.abspath(output_path)) or os.getcwd()
@@ -459,44 +598,101 @@ class OSMDownloader:
         except Exception:
             logger.exception("Failed to set OSMnx cache folder.")
 
-        if network_type == 'roads':
-            G = ox.graph_from_polygon(polygon, network_type='drive', simplify=True)
-        else:
-            custom_filter = '["waterway"~"river|stream|canal"]'
-            G = ox.graph_from_polygon(polygon, custom_filter=custom_filter, retain_all=True, simplify=True)
-            
-        gdf_nodes, gdf_edges = ox.graph_to_gdfs(G)
-        
-        # 兼容 Shapefile 的列表字段转换 - 使用原生循环避免 GeoSeries.apply() 问题
-        import pandas as pd
-        for col in gdf_edges.columns:
-            # 跳过几何列
-            if col == 'geometry':
-                continue
-            # 使用 Python 原生循环检查是否有 list 值
-            has_list = False
-            for val in gdf_edges[col]:
-                if isinstance(val, list):
-                    has_list = True
-                    break
-            if has_list:
-                gdf_edges[col] = gdf_edges[col].apply(lambda x: str(x) if isinstance(x, list) else x)
-                
-        gdf_edges = gdf_edges.reset_index()
         os.makedirs(output_dir, exist_ok=True)
         layer_name = Path(output_path).stem
         suffix = Path(output_path).suffix.lower()
-        if suffix == ".gpkg":
-            gdf_edges.to_file(output_path, layer=layer_name, driver="GPKG")
-            layer_uri = f"{output_path}|layername={layer_name}"
-        elif suffix in {".geojson", ".json"}:
-            gdf_edges.to_file(output_path, driver="GeoJSON")
-            layer_uri = output_path
-        elif suffix == ".shp":
-            gdf_edges.to_file(output_path, driver="ESRI Shapefile")
-            layer_uri = output_path
-        else:
+        if suffix not in {".gpkg", ".geojson", ".json", ".shp"}:
             raise ValueError("Unsupported output format. Use .gpkg, .geojson, or .shp.")
+
+        from qgis.core import QgsApplication, QgsTask
+        from qgis.PyQt.QtCore import QEventLoop, QTimer
+        from ..core.progress import DataAcquisitionCancelled
+
+        class _OSMnxNetworkTask(QgsTask):
+            def __init__(self):
+                super().__init__(f"Build OSMnx {network_type} network", QgsTask.CanCancel)
+                self.exception = None
+                self.detail = "正在请求 OSM 网络并构建拓扑"
+
+            def progress_detail(self):
+                return self.detail
+
+            def run(self):
+                try:
+                    if network_type == "roads":
+                        graph = ox.graph_from_polygon(polygon, network_type="drive", simplify=True)
+                    else:
+                        custom_filter = '["waterway"~"river|stream|canal"]'
+                        graph = ox.graph_from_polygon(
+                            polygon,
+                            custom_filter=custom_filter,
+                            retain_all=True,
+                            simplify=True,
+                        )
+                    if self.isCanceled():
+                        return False
+                    self.detail = "网络已获取，正在转换边要素"
+                    self.setProgress(35)
+                    _nodes, edges = ox.graph_to_gdfs(graph)
+
+                    for col in edges.columns:
+                        if col == "geometry":
+                            continue
+                        if any(isinstance(value, list) for value in edges[col]):
+                            edges[col] = edges[col].apply(
+                                lambda value: str(value) if isinstance(value, list) else value
+                            )
+                    if self.isCanceled():
+                        return False
+                    edges = edges.reset_index()
+                    self.detail = "正在写入网络文件"
+                    self.setProgress(70)
+                    if suffix == ".gpkg":
+                        edges.to_file(output_path, layer=layer_name, driver="GPKG")
+                    elif suffix in {".geojson", ".json"}:
+                        edges.to_file(output_path, driver="GeoJSON")
+                    else:
+                        edges.to_file(output_path, driver="ESRI Shapefile")
+                    self.detail = "网络文件写入完成"
+                    self.setProgress(100)
+                    return True
+                except Exception as exc:
+                    self.exception = exc
+                    return False
+
+        task = _OSMnxNetworkTask()
+        loop = QEventLoop()
+        task.taskCompleted.connect(loop.quit)
+        task.taskTerminated.connect(loop.quit)
+        if task_progress_callback:
+            task.progressChanged.connect(
+                lambda value: task_progress_callback(float(value), task.progress_detail())
+            )
+            task_progress_callback(None, task.progress_detail())
+
+        cancel_timer = QTimer()
+        cancel_timer.setInterval(500)
+
+        def _check_cancel():
+            try:
+                should_cancel = bool(cancel_callback and cancel_callback())
+            except Exception:
+                should_cancel = False
+            if should_cancel:
+                task.cancel()
+
+        cancel_timer.timeout.connect(_check_cancel)
+        QgsApplication.taskManager().addTask(task)
+        cancel_timer.start()
+        loop.exec()
+        cancel_timer.stop()
+
+        if task.exception:
+            raise task.exception
+        if task.status() == QgsTask.Terminated:
+            raise DataAcquisitionCancelled("OSM network download was cancelled by the user.")
+
+        layer_uri = f"{output_path}|layername={layer_name}" if suffix == ".gpkg" else output_path
         
         final_layer = QgsVectorLayer(layer_uri, layer_name, "ogr")
         if not final_layer.isValid():

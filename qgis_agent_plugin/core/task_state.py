@@ -20,6 +20,7 @@ class TaskStep:
     expected_layers: List[str] = field(default_factory=list)
     expected_files: List[str] = field(default_factory=list)
     expected_artifacts: List[str] = field(default_factory=list)
+    expected_outputs: List[Dict[str, Any]] = field(default_factory=list)
     attempts: int = 0
     quality_score: int = 0
     last_tool: str = ""
@@ -39,6 +40,7 @@ class TaskStep:
             "expected_layers": self.expected_layers,
             "expected_files": self.expected_files,
             "expected_artifacts": self.expected_artifacts,
+            "expected_outputs": self.expected_outputs,
             "attempts": self.attempts,
             "quality_score": self.quality_score,
             "last_tool": self.last_tool,
@@ -60,6 +62,7 @@ class TaskStep:
             expected_layers=list(payload.get("expected_layers") or []),
             expected_files=list(payload.get("expected_files") or []),
             expected_artifacts=list(payload.get("expected_artifacts") or []),
+            expected_outputs=list(payload.get("expected_outputs") or []),
             attempts=int(payload.get("attempts") or 0),
             quality_score=int(payload.get("quality_score") or 0),
             last_tool=str(payload.get("last_tool", "")),
