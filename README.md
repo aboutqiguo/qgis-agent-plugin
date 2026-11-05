@@ -351,13 +351,6 @@ QGIS 版本、插件版本、操作系统、任务提示词，以及插件目录
 
 ## 📈 更新日志
 
-### v1.5.0（2026-11）
-
-- **架构模块化重构**：按职责边界拆分三大核心文件（`tools.py` 拆分为 `tools` + `schemas` + `layer_and_processing_ops` + `osm_workflows` + `raster_and_project_ops`；`harness_thread.py` 拆分为主循环 + `harness_execution_helpers` + `harness_memory_and_artifacts` + `harness_progress`；`validators.py` 抽离声明式规则表 `validation_rules.py`），三大核心文件占比由 31.7% 降至 15.8%；
-- **健壮性与异常可观测性加固**：全仓裸 `except:` 与静默 `except Exception: pass` 100% 清零；关键路径（图层快照 `_snapshot_project_layers`、路径归一化 `_canonical_layer_source`、主线程信号槽、SQLite 记忆、检查点、校验器）收窄为精确异常元组并补齐 `exc_info=True` 堆栈日志；
-- **执行沙箱与扩展工具安全加固**：`code_execution_guard.py` 新增运行时受限 `__builtins__` 沙箱与高危模块/文件删除 AST 拦截；用户自定义扩展工具强制 `source_sha256` 完整性防篡改校验、AST 预检与 20 秒超时保护；
-- **真实 QGIS C++ 无头测试与 CI**：新增 `tests/test_qgis_real_smoke.py`（自动发现本机 QGIS 环境运行真实 C++ 层无头集成测试）、`tests/test_security_and_robustness.py` 与 `.github/workflows/ci.yml`（Python 3.10 / 3.12 自动化测试与打包流水线），测试用例增至 153 项；
-- **开源合规与元数据完善**：补齐根目录与插件内 `LICENSE`（MIT），移除未授权第三方参考仓库跟踪，完善 `metadata.txt` 与 `plugins.xml`。
 
 ### v1.4.0（2026-11）
 
